@@ -188,7 +188,10 @@
   (gloss/finite-frame long
     (case (amqp-frame-types type)
       :method (gloss/header [class-id method-id] amqp-method-codecs not-implemented)
-      (not-implemented))))
+      :header (not-implemented)
+      :body (not-implemented)
+      :heartbeat (not-implemented)
+      (throw (ex-info "Unknown frame type" {:type type})))))
 
 (defcodec amqp-frame [(gloss/header [type channel] decode-frame-payload not-implemented) frame-end])
 
