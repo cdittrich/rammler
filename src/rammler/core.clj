@@ -211,8 +211,10 @@
         (if (= header ["AMQP" 0 0 9 1])
           (let [s' (decode-stream s amqp-frame)]
             (d/chain (s/put! s (byte-array payload))
-                     (fn [_] (s/take! s'))
-                     println))
+                     (fn [_]
+                       (d/loop []
+                         (d/chain (s/take! s')
+                           println)))))
           (s/close! s))))))
 
 (defonce server (atom nil))
