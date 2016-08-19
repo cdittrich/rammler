@@ -35,32 +35,34 @@
 (defcodec decimal-value [octet long])
 (defcodec scale octet)
 (defcodec timestamp long-long-uint)
+ ; Solve circular dependency table-value-types -> field-table -> field-value-pair -> field-value -> table-value-types
 (declare table-value-types)
-(defcodec field-value (gloss/header octet (comp table-value-types char) identity))
+(defcodec field-value (gloss/header octet (comp table-value-types char) (fn [_] (throw (ex-info "Not implemented" {})))))
 (defcodec field-array (gloss/repeated field-value :prefix long-int))
 (defcodec field-name shortstr)
 (defcodec field-value-pair [field-name field-value])
 (defcodec field-table (gloss/finite-frame long-uint (gloss/repeated field-value-pair :prefix :none)))
 
-(def table-value-types
-  {\t boolean
-   \b short-short-int
-   \B short-short-uint
-   \U short-int
-   \u short-uint
-   \I long-int
-   \i long-uint
-   \L long-long-int
-   \l long-long-uint
-   \f float
-   \d double
-   \D decimal-value
-   \s shortstr
-   \S longstr
-   \A field-array
-   \T timestamp
-   \F field-table
-   \V :none})
+(alter-var-root #'table-value-types
+  (constantly
+   {\t boolean
+    \b short-short-int
+    \B short-short-uint
+    \U short-int
+    \u short-uint
+    \I long-int
+    \i long-uint
+    \L long-long-int
+    \l long-long-uint
+    \f float
+    \d double
+    \D decimal-value
+    \s shortstr
+    \S longstr
+    \A field-array
+    \T timestamp
+    \F field-table
+    \V :none}))
 
 ;;; Domains
 (defcodec class-id short)
