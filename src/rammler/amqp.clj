@@ -1,10 +1,39 @@
 (ns rammler.amqp
   (:refer-clojure :exclude [short long boolean float double type rest])
   (:require [gloss.core :as gloss :refer :all]
-            [gloss.io :refer [decode encode]]))
+            [gloss.io :refer [decode encode]]
+            [clojure.string :as str]))
 
-(defn not-implemented [& _]
-  (throw (ex-info "Not implemented" {})))
+(defmulti encode-field-value clojure.core/type)
+(defmethod encode-field-value :default [x]
+  (throw (ex-info "Not implemented" {:type (clojure.core/type x)
+                                     :value x})))
+
+(defmethod encode-field-value java.lang.Boolean [_] \t)
+
+(defmethod encode-field-value java.lang.Number [n]
+  (if (neg? n)
+    (condp > (/ (Math/log10 (* n -2)) (Math/log10 2))
+      8 \b
+      16 \u
+      32 \i
+      64 \L)
+    (condp > (/ (Math/log10 n) (Math/log10 2))
+      8 \B
+      16 \U
+      32 \I
+      64 \l)))
+
+(defmethod encode-field-value java.lang.Float [_] \f)
+(defmethod encode-field-value java.lang.Double [_] \d)
+(defmethod encode-field-value java.lang.String [s]
+  ; Somehow, RabbitMQ doesn't eat short strings in tables where it should be allowed
+  #_(if (< (count s) 256) \s \S)
+  \S)
+
+(defmethod encode-field-value clojure.lang.PersistentHashMap [_] \F)
+(defmethod encode-field-value clojure.lang.PersistentArrayMap [_] \F)
+(defmethod encode-field-value clojure.lang.PersistentVector [_] \A)
 
 ;;; Grammar
 (defcodec short :uint16)
@@ -13,8 +42,9 @@
 (defcodec shortstr (finite-frame octet (string :ascii)))
 (defcodec longstr (finite-frame long (string :ascii)))
 (defcodec value-type octet)
-
-(defcodec boolean octet)
+(defcodec boolean octet
+  #(if % 1 0)
+  #(not (zero? %)))
 (defcodec short-short-int octet)
 (defcodec short-short-uint octet)
 (defcodec short-int :int16)
@@ -34,11 +64,13 @@
 
  ; Solve circular dependency table-value-types -> field-table -> field-value-pair -> field-value -> table-value-types
 (declare table-value-types)
-(defcodec field-value (header octet (comp #'table-value-types char) not-implemented))
+(defcodec field-value (header octet (comp #'table-value-types (fn [x] (println x) x) char) (comp int encode-field-value)))
 (defcodec field-array (repeated field-value :prefix long-int))
 (defcodec field-name shortstr)
 (defcodec field-value-pair [field-name field-value])
-(defcodec field-table (finite-frame long-uint (repeated field-value-pair :prefix :none)))
+(defcodec field-table (finite-frame long-uint (repeated field-value-pair :prefix :none))
+  seq
+  (partial into {}))
 
 (def table-value-types
   {\t boolean
@@ -74,6 +106,9 @@
 (defcodec reply-text shortstr)
 (defcodec any (repeated :byte :prefix :byte))
 
+;;; SASL
+(defcodec sasl-plain (string :utf-8))
+
 ;;; Protocol
 (def amqp-frame-types
   {1 :method
@@ -88,6 +123,9 @@
    50 :queue
    60 :basic
    90 :tx})
+
+(def amqp-classes-reverse
+  (zipmap (vals amqp-classes) (keys amqp-classes)))
 
 (def amqp-methods
   {:connection
@@ -150,6 +188,9 @@
     30 :rollback
     31 :rollback-ok}})
 
+(def amqp-methods-reverse
+  (into {} (for [[class methods] amqp-methods] [class (zipmap (vals methods) (keys methods))])))
+
 (def amqp-method-signatures
   {:connection
    {:start [[:version-major octet] [:version-minor octet] [:server-properties peer-properties] [:mechanisms longstr] [:locales longstr]]
@@ -199,3 +240,26 @@
   (if (= 0xCE (bit-and frame-end 0xFF))
     [type channel payload]
     (throw (ex-info "Invalid frame-end byte encountered" {:frame-end frame-end}))))
+
+(defmulti encode-payload :type)
+
+(defmethod encode-payload :method [{:keys [channel class method payload]}]
+  (let [id [(amqp-classes-reverse class) (get-in amqp-methods-reverse [class method])]]
+    (encode amqp-frame [1 channel
+                        (decode rest
+                                (concat (encode [class-id method-id] id)
+                                        (encode (amqp-method-codecs id)
+                                                (map payload (amqp-method-fields id)))))
+                        (.byteValue 0xCE)])))
+
+(defn decode-amqp-frame [frame]
+  (decode-payload (validate-frame frame)))
+
+(defmulti postdecode (fn [{:keys [class method]}] [class method]))
+
+(defmethod postdecode :default [x] x)
+
+(let [null-regex (re-pattern (str (char 0)))]
+  (defmethod postdecode [:connection :start-ok] [message]
+   (update-in message [:payload :response]
+              #(zipmap [:authcid :authzid :passwd] (str/split % null-regex)))))
