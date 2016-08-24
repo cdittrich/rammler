@@ -64,7 +64,7 @@
 
  ; Solve circular dependency table-value-types -> field-table -> field-value-pair -> field-value -> table-value-types
 (declare table-value-types)
-(defcodec field-value (header octet (comp #'table-value-types (fn [x] (println x) x) char) (comp int encode-field-value)))
+(defcodec field-value (header octet (comp #'table-value-types char) (comp int encode-field-value)))
 (defcodec field-array (repeated field-value :prefix long-int))
 (defcodec field-name shortstr)
 (defcodec field-value-pair [field-name field-value])
@@ -113,8 +113,8 @@
 (def amqp-frame-types
   {1 :method
    2 :header
-   3 :body
-   4 :heartbeat})
+   4 :body
+   8 :heartbeat})
 
 (def amqp-classes
   {10 :connection
@@ -236,6 +236,8 @@
                (amqp-method-fields method)
                (decode (amqp-method-codecs method) (byte-array arguments)))}))
 
+(defmethod decode-payload :heartbeat [_] {:type :heatbeat})
+
 (defn validate-frame [[type channel payload frame-end]]
   (if (= 0xCE (bit-and frame-end 0xFF))
     [type channel payload]
@@ -252,14 +254,14 @@
                                                 (map payload (amqp-method-fields id)))))
                         (.byteValue 0xCE)])))
 
-(defn decode-amqp-frame [frame]
-  (decode-payload (validate-frame frame)))
-
 (defmulti postdecode (fn [{:keys [class method]}] [class method]))
 
 (defmethod postdecode :default [x] x)
 
 (let [null-regex (re-pattern (str (char 0)))]
-  (defmethod postdecode [:connection :start-ok] [message]
-   (update-in message [:payload :response]
-              #(zipmap [:authcid :authzid :passwd] (str/split % null-regex)))))
+  (defmethod postdecode [:connection :start-ok] [frame]
+    (update-in frame [:payload :response]
+               #(zipmap [:authcid :authzid :passwd] (str/split % null-regex)))))
+
+(defn decode-amqp-frame [frame]
+  (postdecode (decode-payload (validate-frame frame))))
