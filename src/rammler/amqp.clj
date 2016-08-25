@@ -1,7 +1,8 @@
 (ns rammler.amqp
   (:refer-clojure :exclude [short long boolean float double type rest])
   (:require [gloss.core :as gloss :refer :all]
-            [gloss.io :refer [decode encode]]
+            [gloss.io :refer [decode decode-stream encode]]
+            [manifold.stream :as s]
             [clojure.string :as str]))
 
 (defmulti encode-field-value clojure.core/type)
@@ -39,8 +40,12 @@
 (defcodec short :uint16)
 (defcodec long :uint32)
 (defcodec octet :byte)
-(defcodec shortstr (finite-frame octet (string :ascii)))
-(defcodec longstr (finite-frame long (string :ascii)))
+(defcodec shortstr (finite-frame octet (string :ascii))
+  identity
+  #(or % ""))
+(defcodec longstr (finite-frame long (string :ascii))
+  identity
+  #(or % ""))
 (defcodec value-type octet)
 (defcodec boolean octet
   #(if % 1 0)
@@ -105,15 +110,26 @@
 (defcodec reply-code short)
 (defcodec reply-text shortstr)
 (defcodec any (repeated :byte :prefix :byte))
+(defcodec bits octet)
 
 ;;; SASL
 (defcodec sasl-plain (string :utf-8))
 
 ;;; Protocol
+(defcodec amqp-header [(string :ascii :length 4) octet octet octet octet])
+(defcodec payload (repeated :byte :prefix long))
+(defcodec amqp-frame [type channel payload frame-end])
+(defcodec rest (repeated :byte :prefix :none))
+(defcodec weight short)
+(defcodec body-size long-long-uint)
+(defcodec property-flags short)
+(defcodec property-list rest)
+(defcodec amqp-content-header [class-id weight body-size property-flags property-list])
+
 (def amqp-frame-types
   {1 :method
    2 :header
-   4 :body
+   3 :body
    8 :heartbeat})
 
 (def amqp-classes
@@ -200,41 +216,60 @@
     :tune [[:channel-max short] [:frame-max long] [:heartbeat short]]
     :tune-ok [[:channel-max short] [:frame-max long] [:heartbeat short]]
     :open [[:virtual-host path] [:reversed-1 any] [:reserved-2 any]]
-    :open-ok [[:reserved-1 any]]
+    :open-ok [[:reserved-1 rest]]
     :close [[:reply-code reply-code] [:reply-text reply-text] [:class-id class-id] [:method-id method-id]]
-    :close-ok []}})
+    :close-ok []}
+
+   :channel
+   {:open [[:virtual-host path] #_[:reversed-1 any] #_[:reserved-2 any]]
+    :open-ok [[:reversed-1 rest]]
+    :close [[:reply-code reply-code] [:reply-text reply-text] [:class-id class-id] [:method-id method-id]]
+    :close-ok []}
+
+   :basic
+   {:publish [#_[:reserved-1 any] [:trash-1 octet] [:trash-2 octet] [:exchange exchange-name] [:routing-key shortstr] [:attributes bits] #_[:mandatory bit] #_[:immediate bit]]}})
 
 (def amqp-method-fields
-  (into {} (for [[class-id class] amqp-classes [method-id method] (amqp-methods class)]
-             [[class-id method-id] (map first (get-in amqp-method-signatures [class method]))])))
+  (into {} (for [[class-id class] amqp-classes [method-id method] (amqp-methods class)
+                 :let [signature (get-in amqp-method-signatures [class method])]]
+             [[class-id method-id] (if signature (map first signature) :not-implemented)])))
 
 (def amqp-method-codecs
   (into {} (for [[class-id class] amqp-classes [method-id method] (amqp-methods class)]
              [[class-id method-id] (compile-frame (map second (get-in amqp-method-signatures [class method])))])))
 
-(defcodec amqp-header [(string :ascii :length 4) octet octet octet octet])
-(defcodec payload (repeated :byte :prefix long))
-(defcodec amqp-frame [type channel payload frame-end])
-(defcodec rest (repeated :byte :prefix :none))
-
 (defmulti decode-payload (comp amqp-frame-types first))
 
 (defmethod decode-payload :default [[frame-type channel payload]]
-  (throw (ex-info "Unimplemented frame type" {:frame-type (get amqp-frame-types frame-type frame-type)
+  (throw (ex-info "Unimplemented frame type" {:type (get amqp-frame-types frame-type frame-type)
                                               :channel channel
                                               :payload payload})))
 
 (defmethod decode-payload :method [[_ channel payload]]
   (let [[class-id method-id arguments] (decode [class-id method-id rest] (byte-array payload))
         class (amqp-classes class-id)
-        method [class-id method-id]]
+        method [class-id method-id]
+        fields (amqp-method-fields method)]
     {:type :method
      :channel channel
      :class class
      :method (get-in amqp-methods [class method-id])
-     :payload (zipmap
-               (amqp-method-fields method)
-               (decode (amqp-method-codecs method) (byte-array arguments)))}))
+     :payload (if (= fields :not-implemented)
+                {:not-implemented arguments}
+                (try (zipmap fields (decode (amqp-method-codecs method) (byte-array arguments)))
+                     (catch Exception _ {:error arguments})))}))
+
+(defmethod decode-payload :header [[frame-type channel payload]]
+  {:type :header
+   :channel channel
+   :payload (zipmap
+             [:class-id :weight :body-size :property-flags :property-list]
+             (decode amqp-content-header (byte-array payload)))})
+
+(defmethod decode-payload :body [[frame-type channel payload]]
+  {:type :body
+   :channel channel
+   :payload payload})
 
 (defmethod decode-payload :heartbeat [_] {:type :heatbeat})
 
@@ -254,6 +289,14 @@
                                                 (map payload (amqp-method-fields id)))))
                         (.byteValue 0xCE)])))
 
+(def bitmask-seq (partial zipmap (iterate (partial * 2) 1)))
+ 
+(defn flagfn [& xs]
+  (fn [n]
+    (let [bitmask (apply bitmask-seq xs)]
+      (->> (filter (complement #(zero? (bit-and n %))) (keys bitmask))
+           (select-keys bitmask) vals set))))
+
 (defmulti postdecode (fn [{:keys [class method]}] [class method]))
 
 (defmethod postdecode :default [x] x)
@@ -263,5 +306,12 @@
     (update-in frame [:payload :response]
                #(zipmap [:authcid :authzid :passwd] (str/split % null-regex)))))
 
+(defmethod postdecode [:basic :publish] [frame]
+  (update-in frame [:payload :attributes] (flagfn :mandatory :immediate)))
+
 (defn decode-amqp-frame [frame]
-  (postdecode (decode-payload (validate-frame frame))))
+  (try (postdecode (decode-payload (validate-frame frame)))
+       (catch Exception e (println "Error decoding frame: " e))))
+
+(defn decode-amqp-stream [src]
+  (s/map decode-amqp-frame (decode-stream src amqp-frame)))

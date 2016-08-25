@@ -1,5 +1,6 @@
 (ns rammler.core
   (:require [rammler.amqp :as amqp]
+            [rammler.util :as util]
             [aleph.tcp :as tcp]
             [gloss.io :refer [decode-stream decode encode]]
             [manifold.deferred :as d]
@@ -31,12 +32,10 @@
    :consumer-priorities])
 
 (def copyright "Copyright (C) 2016 LShift Services GmbH")
-(def license "Licensed under the MPL.  See http://www.rabbitmq.com/")
+(def license "Licensed under the AGPLv3+.  See http://bigwig.io/")
 (def platform (format "Clojure %s on %s %s" (clojure-version) (System/getProperty "java.vm.name") (System/getProperty "java.version")))
 (def product "rammler")
 (def version (get-version "lshift-de" "rammler"))
-
-(defn decode-amqp-stream [src] (decode-stream src amqp/amqp-frame))
 
 (comment
   ; RabbitMQ server reply
@@ -81,7 +80,6 @@
                                                  :mechanisms "AMQPLAIN PLAIN"
                                                  :locales "en_US"}})))
 
-
 (defmulti handle-method-frame (fn [stream info {:keys [class method]}] [class method]))
 
 (defmethod handle-method-frame :default [stream info frame]
@@ -93,6 +91,7 @@
     (println (format "New Connection from %s (%s %s) -> %s:%d"
                      remote-addr (client-properties "product") (client-properties "version")
                      server-name server-port))
+    (util/locking-print frame)
     (d/let-flow [conn (tcp/client {:host rabbit1-server :port rabbit1-port})]
        (d/chain (s/put! conn (encode amqp/amqp-header ["AMQP" 0 0 9 1]))
                 (fn [_] (s/take! conn))
@@ -101,10 +100,7 @@
                   (println "Connected to RabbitMQ")
                   (s/connect stream conn)
                   (s/connect conn stream)
-                  
-                  (let [lock :bla]
-                    (s/consume (fn [x] (locking lock (println "client" (amqp/decode-amqp-frame x)))) (decode-amqp-stream stream))
-                    (s/consume (fn [x] (locking lock (println "rabbit" (amqp/decode-amqp-frame x)))) (decode-amqp-stream conn))))))))
+                  (s/consume (fn [frame] (util/locking-print "Server" (prn-str frame))) (amqp/decode-amqp-stream conn)))))))
 
 (defn handler
   "Handle incoming AMQP 0.9.1 connections
@@ -139,41 +135,32 @@
   (-> (s/take! s)
       (d/chain (partial decode amqp/amqp-header)
                (fn [header]
-                 (println "Got header" header)
+                 (util/locking-print "Got header" header)
                  (if (= header ["AMQP" 0 0 9 1])
-                   (let [s' (decode-amqp-stream s)
+                   (let [s' (amqp/decode-amqp-stream s)
                          s'' (s/stream)]
                      (s/connect s s'')
-                     (d/chain (send-start s) (fn [_] (s/take! s')) amqp/decode-amqp-frame
-                              (fn [{:keys [type] :as frame}]
-                                #_(s/consume-async (fn [x] (println "alternative" (map int x)) (d/deferred true)) s')
-                                (handle-method-frame (s/splice s s'') info frame)
-                                (prn frame)
-                                
-                                #_(d/loop [exit false]
-                                    (when-not exit
-                                      (d/chain (s/take! s') amqp/decode-amqp-frame
-                                               (fn [{:keys [type] :as frame}]
-                                                 (prn frame)
-                                                 #_(handle-method-frame s'' info frame)
-                                                 (d/recur (if (= type :method) (handle-method-frame s'' info frame) false))))))))))))
-      (d/catch (fn [e] (println "Exception" e) (s/close! s)))))
-
+                     (d/chain (send-start s) (fn [_] (s/take! s'))
+                              (fn [{:keys [type class method] :as frame}]
+                                (s/consume (fn [frame] (util/locking-print "Client" (prn-str frame))) s')
+                                (if (= [type class method] [:method :connection :start-ok])
+                                  (handle-method-frame (s/splice s s'') info frame)
+                                  (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
+                                                                        :got (select-keys frame [type class method])})))))))))
+      (d/catch (fn [e] (util/locking-print "Exception" e) (s/close! s)))))
 
 #_(d/let-flow [conn (tcp/client {:host rabbit1-server :port rabbit1-port})]
-    (s/connect s conn)
-    (s/connect conn s)
-    (s/consume (fn [x] (println "client" x)) (decode-amqp-stream s))
-    (s/consume (fn [x] (println "rabbit" x)) (decode-amqp-stream conn)))
+  (s/connect s conn)
+  (s/connect conn s)
+  (let [lock ::lock]
+    (s/consume (fn [x] (util/locking lock (println "client" x))) (decode-amqp-stream s))
+    (s/consume (fn [x] (util/locking lock (println "rabbit" x))) (decode-amqp-stream conn))))
 
 (defonce server (atom nil))
 
 (defn start-server []
-  (when @server (.close @server))
+  (try (when @server (.close @server)) (catch Exception _))
   (reset! server (tcp/start-server #'handler {:port 5672})))
 
 (defn -main [& args]
   (start-server))
-
-(comment
-  (->> (byte-array payload) (gloss.io/decode amqp/amqp-frame) amqp/validate-frame amqp/decode-payload))
