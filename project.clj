@@ -1,6 +1,6 @@
 (defproject lshift-de/rammler "0.1.0-SNAPSHOT"
   :description "RabbitMQ Proxy"
-  :url "http://bigwig.io/"
+  :url "https://github.com/lshift-de/rammler"
   :license {:name "AGPLv3+"
             :url "http://www.gnu.org/licenses/agpl.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
