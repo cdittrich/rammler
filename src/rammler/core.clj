@@ -37,53 +37,31 @@
 (def product "rammler")
 (def version (get-version "lshift-de" "rammler"))
 
-(comment
-  ; RabbitMQ server reply
-  {:type :method
-   :channel 0
-   :class :connection
-   :method :start
-   :payload {:version-major 0
-             :version-minor 9
-             :server-properties {"capabilities" {"publisher_confirms" 1
-                                                 "per_consumer_qos" 1
-                                                 "exchange_exchange_bindings" 1
-                                                 "authentication_failure_close" 1
-                                                 "connection.blocked" 1
-                                                 "consumer_cancel_notify" 1
-                                                 "basic.nack" 1
-                                                 "direct_reply_to" 1
-                                                 "consumer_priorities" 1}
-                                 "cluster_name" "rabbit@broker1.adorno.in.lshift.de"
-                                 "copyright" "Copyright (C) 2007-2016 Pivotal Software, Inc."
-                                 "information" "Licensed under the MPL.  See http://www.rabbitmq.com/"
-                                 "platform" "Erlang/OTP"
-                                 "product" "RabbitMQ"
-                                 "version" "3.6.5"}
-             :mechanisms "AMQPLAIN PLAIN"
-             :locales "en_US"}})
+(defn debug [prefix]
+  (fn [frame]
+    (util/locking-print prefix (prn-str frame))))
 
 (defn send-start [stream]
-  (s/put! stream (amqp/encode-payload {:type :method
-                                       :channel 0
-                                       :class :connection
-                                       :method :start
-                                       :payload {:version-major 0
-                                                 :version-minor 9
-                                                 :server-properties {"capabilities" (zipmap (map ->snake_case_string server-capabilities) (repeat true))
-                                                                     "cluster_name" "rabbit@broker1.adorno.in.lshift.de"
-                                                                     "copyright" copyright
-                                                                     "information" license
-                                                                     "platform" platform
-                                                                     "product" product
-                                                                     "version" version}
-                                                 :mechanisms "AMQPLAIN PLAIN"
-                                                 :locales "en_US"}})))
+  (s/put! stream (amqp/encode-frame {:type :method
+                                     :channel 0
+                                     :class :connection
+                                     :method :start
+                                     :payload {:version-major 0
+                                               :version-minor 9
+                                               :server-properties {"capabilities" (zipmap (map ->snake_case_string server-capabilities) (repeat true))
+                                                                   "cluster_name" "rabbit@broker1.adorno.in.lshift.de"
+                                                                   "copyright" copyright
+                                                                   "information" license
+                                                                   "platform" platform
+                                                                   "product" product
+                                                                   "version" version}
+                                               :mechanisms "AMQPLAIN PLAIN"
+                                               :locales "en_US"}})))
 
 (defmulti handle-method-frame (fn [stream info {:keys [class method]}] [class method]))
 
 (defmethod handle-method-frame :default [stream info frame]
-  (println "Unhandled method frame" frame))
+  (util/locking-print "Unhandled method frame" frame))
 
 (defmethod handle-method-frame [:connection :start-ok] [stream info {:keys [payload] :as frame}]
   (let [{:keys [client-properties mechanism response]} payload
@@ -91,16 +69,17 @@
     (println (format "New Connection from %s (%s %s) -> %s:%d"
                      remote-addr (client-properties "product") (client-properties "version")
                      server-name server-port))
-    (util/locking-print frame)
+    (util/locking-print "Client" frame)
     (d/let-flow [conn (tcp/client {:host rabbit1-server :port rabbit1-port})]
        (d/chain (s/put! conn (encode amqp/amqp-header ["AMQP" 0 0 9 1]))
                 (fn [_] (s/take! conn))
                 (partial decode amqp/amqp-frame) amqp/decode-amqp-frame
                 (fn [frame]
                   (println "Connected to RabbitMQ")
+                  (util/locking-print "Server" (prn-str frame))
                   (s/connect stream conn)
                   (s/connect conn stream)
-                  (s/consume (fn [frame] (util/locking-print "Server" (prn-str frame))) (amqp/decode-amqp-stream conn)))))))
+                  (s/consume (debug "Server") (amqp/decode-amqp-stream conn)))))))
 
 (defn handler
   "Handle incoming AMQP 0.9.1 connections
@@ -142,19 +121,12 @@
                      (s/connect s s'')
                      (d/chain (send-start s) (fn [_] (s/take! s'))
                               (fn [{:keys [type class method] :as frame}]
-                                (s/consume (fn [frame] (util/locking-print "Client" (prn-str frame))) s')
+                                (s/consume (debug "Client") s')
                                 (if (= [type class method] [:method :connection :start-ok])
                                   (handle-method-frame (s/splice s s'') info frame)
                                   (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
                                                                         :got (select-keys frame [type class method])})))))))))
       (d/catch (fn [e] (util/locking-print "Exception" e) (s/close! s)))))
-
-#_(d/let-flow [conn (tcp/client {:host rabbit1-server :port rabbit1-port})]
-  (s/connect s conn)
-  (s/connect conn s)
-  (let [lock ::lock]
-    (s/consume (fn [x] (util/locking lock (println "client" x))) (decode-amqp-stream s))
-    (s/consume (fn [x] (util/locking lock (println "rabbit" x))) (decode-amqp-stream conn))))
 
 (defonce server (atom nil))
 
