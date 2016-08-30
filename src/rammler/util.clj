@@ -1,12 +1,5 @@
 (ns rammler.util)
 
-(defn locking-print
-  "`println` with locking
-
-  Allows for concurrent output not to be scrambled."
-  [& more]
-  (locking ::print-lock (apply println more)))
-
 (let [powers-of-two (iterate (partial * 2) 1)]
   (defn flagfn
     "Return new `fn` that returns sets of `flags` for bitmasks"

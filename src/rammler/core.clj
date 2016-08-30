@@ -1,138 +1,83 @@
 (ns rammler.core
-  (:require [rammler.amqp :as amqp]
-            [rammler.util :as util]
-            [aleph.tcp :as tcp]
-            [gloss.io :refer [decode-stream decode encode]]
-            [manifold.deferred :as d]
-            [manifold.stream :as s]
-            [trptcolin.versioneer.core :refer [get-version]]
-            [camel-snake-kebab.core :refer :all]
-            [camel-snake-kebab.extras :refer [transform-keys]]
-            
-            [langohr.core      :as rmq]
-            [langohr.channel   :as lch]
-            [langohr.queue     :as lq]
-            [langohr.exchange  :as le]
-            [langohr.consumers :as lc]
-            [langohr.basic     :as lb])
+  (:require [rammler.server :refer [start-server]]
+            [rammler.conf :as conf]
+            [guns.cli.optparse :refer (parse)]
+            [taoensso.timbre :as timbre
+             :refer (trace debug info warn error fatal spy with-log-level)])
+  (:import clojure.lang.ExceptionInfo)
   (:gen-class))
 
-(def rabbit1-server "localhost")
-(def rabbit1-port 5673)
+(def cli-options
+  [["-h" "--help"    "Display this help and exit"]
+   [nil  "--version" "Output version information and exit"]
+   ["-v" "--verbose" "Verbose output"]
+   [nil  "--debug"   "Debugging output (takes precedence over --verbose)"]
+   [nil  "--trace"   "Tracing output (takes precedence over --verbose and --debug)"]])
 
-(def server-capabilities
-  [:publisher-confirms
-   :per-consumer-qos
-   :exchange-exchange-bindings
-   :authentication-failure-close
-   :connection.blocked
-   :consumer-cancel-notify
-   :basic.nack
-   :direct-reply-to
-   :consumer-priorities])
+(def agpl-notice "License AGPLv3+: GNU Affero General Public License version 3 or later <https://www.gnu.org/licenses/agpl-3.0.en.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.")
 
-(def copyright "Copyright (C) 2016 LShift Services GmbH")
-(def license "Licensed under the AGPLv3+.  See http://bigwig.io/")
-(def platform (format "Clojure %s on %s %s" (clojure-version) (System/getProperty "java.vm.name") (System/getProperty "java.version")))
-(def product "rammler")
-(def version (get-version "lshift-de" "rammler"))
+(defn print-usage
+  "Print usage to `*out*`"
+  [banner]
+  (println "Usage: rammler [options]")
+  (println "RabbitMQ Proxy")
+  (println banner))
 
-(defn debug [prefix]
-  (fn [frame]
-    (util/locking-print prefix (prn-str frame))))
+(defn print-version
+  "Print version information to `*out*`"
+  []
+  (println (format "rammler %s on %s %s"
+                   conf/version
+                   (System/getProperty "java.version")
+                   (System/getProperty "java.vm.name")))
+  (println conf/copyright)
+  (println agpl-notice))
 
-(defn send-start [stream]
-  (s/put! stream (amqp/encode-frame {:type :method
-                                     :channel 0
-                                     :class :connection
-                                     :method :start
-                                     :payload {:version-major 0
-                                               :version-minor 9
-                                               :server-properties {"capabilities" (zipmap (map ->snake_case_string server-capabilities) (repeat true))
-                                                                   "cluster_name" "rabbit@broker1.adorno.in.lshift.de"
-                                                                   "copyright" copyright
-                                                                   "information" license
-                                                                   "platform" platform
-                                                                   "product" product
-                                                                   "version" version}
-                                               :mechanisms "AMQPLAIN PLAIN"
-                                               :locales "en_US"}})))
+(defn handle-options
+  "Handle side effects of command line `options`"
+  [options]
+  (doseq [level [:verbose :debug :trace]]
+    (when (options level)
+      (timbre/set-level! level))))
 
-(defmulti handle-method-frame (fn [stream info {:keys [class method]}] [class method]))
+(defn parse-args
+  "Optparse `args` and handle exceptions"
+  [args]
+  (try (parse args cli-options)
+       (catch AssertionError e
+         (throw (ex-info (.getMessage e) {:cause :cli-parser-error})))))
 
-(defmethod handle-method-frame :default [stream info frame]
-  (util/locking-print "Unhandled method frame" frame))
+(defn run
+  "Attempt to run rammler from `args`"
+  [args]
+  (let [[options args banner] (parse-args args)]
+    (handle-options options)
+    (or (cond (:help options) (print-usage banner)
+              (:version options) (print-version)
+              :default (start-server))
+        0)))
 
-(defmethod handle-method-frame [:connection :start-ok] [stream info {:keys [payload] :as frame}]
-  (let [{:keys [client-properties mechanism response]} payload
-        {:keys [remote-addr server-port server-name]} info]
-    (println (format "New Connection from %s (%s %s) -> %s:%d"
-                     remote-addr (client-properties "product") (client-properties "version")
-                     server-name server-port))
-    (util/locking-print "Client" frame)
-    (d/let-flow [conn (tcp/client {:host rabbit1-server :port rabbit1-port})]
-       (d/chain (s/put! conn (encode amqp/amqp-header ["AMQP" 0 0 9 1]))
-                (fn [_] (s/take! conn))
-                (partial decode amqp/amqp-frame) amqp/decode-amqp-frame
-                (fn [frame]
-                  (println "Connected to RabbitMQ")
-                  (util/locking-print "Server" (prn-str frame))
-                  (s/connect stream conn)
-                  (s/connect conn stream)
-                  (s/consume (debug "Server") (amqp/decode-amqp-stream conn)))))))
+(defn handle-cause
+  "Handle ExceptionInfo exceptions"
+  [^ExceptionInfo e]
+  (let [{:keys [cause]} (ex-data e)
+        [msg code] (case cause
+                     :cli-parser-error ["Command line error" 5]
+                     ["Unknown error" 255])]
+    (error (format "%s: %s" msg (.getMessage e)))
+    code))
 
-(defn handler
-  "Handle incoming AMQP 0.9.1 connections
-
-  From the specification:
-  2.2.4 The Connection Class
-  AMQP is a connected protocol. The connection is designed to be long-lasting, and can carry multiple
-  channels. The connection life-cycle is this:
-  - The client opens a TCP/IP connection to the server and sends a protocol header. This is the only data
-  - the client sends that is not formatted as a method.
-  - The server responds with its protocol version and other properties, including a list of the security
-    mechanisms that it supports (the Start method).
-  - The client selects a security mechanism (Start-Ok).
-  - The server starts the authentication process, which uses the SASL challenge-response model. It sends
-    the client a challenge (Secure).
-  - The client sends an authentication response (Secure-Ok). For example using the \"plain\" mechanism,
-    the response consist of a login name and password.
-  - The server repeats the challenge (Secure) or moves to negotiation, sending a set of parameters such as
-    maximum frame size (Tune).
-  - The client accepts or lowers these parameters (Tune-Ok).
-  - The client formally opens the connection and selects a virtual host (Open).
-  - The server confirms that the virtual host is a valid choice (Open-Ok).
-  - The client now uses the connection as desired.
-  - One peer (client or server) ends the connection (Close).
-  - The other peer hand-shakes the connection end (Close-Ok).
-  - The server and the client close their socket connection.
-
-  There is no hand-shaking for errors on connections that are not fully open. Following successful protocol
-  header negotiation, which is defined in detail later, and prior to sending or receiving Open or Open-Ok, a
-  peer that detects an error MUST close the socket without sending any further data."
-  [s info]
-  (-> (s/take! s)
-      (d/chain (partial decode amqp/amqp-header)
-               (fn [header]
-                 (util/locking-print "Got header" header)
-                 (if (= header ["AMQP" 0 0 9 1])
-                   (let [s' (amqp/decode-amqp-stream s)
-                         s'' (s/stream)]
-                     (s/connect s s'')
-                     (d/chain (send-start s) (fn [_] (s/take! s'))
-                              (fn [{:keys [type class method] :as frame}]
-                                (s/consume (debug "Client") s')
-                                (if (= [type class method] [:method :connection :start-ok])
-                                  (handle-method-frame (s/splice s s'') info frame)
-                                  (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
-                                                                        :got (select-keys frame [type class method])})))))))))
-      (d/catch (fn [e] (util/locking-print "Exception" e) (s/close! s)))))
-
-(defonce server (atom nil))
-
-(defn start-server []
-  (try (when @server (.close @server)) (catch Exception _))
-  (reset! server (tcp/start-server #'handler {:port 5672})))
-
-(defn -main [& args]
-  (start-server))
+(defn -main
+  "Set defaults and run rammler"
+  [& args]
+  (timbre/set-level! :error)
+  (System/exit
+   (try
+     (try (run args)
+          (catch ExceptionInfo e
+            (handle-cause e)))
+     (catch Exception e
+       (error (format "rammler died with an unexpected error: %s" (timbre/stacktrace e)))
+       255))))

@@ -8,7 +8,10 @@
                  [gloss "0.2.6"]
                  [trptcolin/versioneer "0.2.0"]
                  [camel-snake-kebab "0.4.0"]
-                 [com.novemberain/langohr "3.6.1"]]
-  :main ^:skip-aot rammler.core
+                 [guns.cli/optparse "1.1.2"]
+                 [com.taoensso/timbre "4.7.4"]]
   :target-path "target/%s"
-  :profiles {:uberjar {:aot :all}})
+  :profiles {:uberjar {:aot :all
+                       :main rammler.core}
+             :dev {:dependencies [[com.novemberain/langohr "3.6.1"]]
+                   :resource-paths ["dev"]}})
