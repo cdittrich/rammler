@@ -1,0 +1,6 @@
+# The default for rammler is to use stdout for journald based logging
+LOG_DIRECTORY=""
+
+# Can be set to one of: trace, debug, info, warn, error, fatal, report
+# The default is warn
+# LOG_LEVEL=debug

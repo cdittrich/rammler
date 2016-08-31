@@ -1,5 +1,6 @@
 (ns user
   (:require [rammler.core :as core]
+            [rammler.conf :as conf]
             [rammler.server :as server]
             [rammler.amqp :as amqp]
             [rammler.util :as util]
@@ -14,13 +15,15 @@
             [taoensso.timbre :as timbre
              :refer (trace debug info warn error fatal spy with-log-level)]))
 
-(timbre/set-level! :trace)
+(conf/set-configuration!)
 
 (timbre/merge-config!
  {:appenders
   {:println (assoc (timbre/println-appender {:stream :auto})
                    :output-fn (fn [{:keys [level msg_]}]
-                                (format "%s> %s" (name level) (force msg_))))
-   :spit (timbre/spit-appender {:fname "log/output"})}})
+                                (format "%s> %s" (name level) (force msg_))))}})
 
-(server/start-server)
+(defn start []
+  (server/start-server))
+
+

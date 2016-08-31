@@ -1,11 +1,11 @@
 (ns rammler.core
   (:require [rammler.server :refer [start-server]]
             [rammler.conf :as conf]
-            [guns.cli.optparse :refer (parse)]
-            [taoensso.timbre :as timbre
-             :refer (trace debug info warn error fatal spy with-log-level)])
+            [guns.cli.optparse :refer (parse)])
   (:import clojure.lang.ExceptionInfo)
   (:gen-class))
+
+(taoensso.timbre/refer-timbre)
 
 (def cli-options
   [["-h" "--help"    "Display this help and exit"]
@@ -72,12 +72,14 @@ There is NO WARRANTY, to the extent permitted by law.")
 (defn -main
   "Set defaults and run rammler"
   [& args]
-  (timbre/set-level! :error)
-  (System/exit
-   (try
-     (try (run args)
-          (catch ExceptionInfo e
-            (handle-cause e)))
-     (catch Exception e
-       (error (format "rammler died with an unexpected error: %s" (timbre/stacktrace e)))
-       255))))
+  (conf/set-configuration!)
+  (timbre/with-merged-config
+    {:appenders {:println (assoc (timbre/println-appender {:stream :std-out}) :output-fn (comp force :msg_))}}
+    (System/exit
+     (try
+       (try (run args)
+            (catch ExceptionInfo e
+              (handle-cause e)))
+       (catch Exception e
+         (error (format "rammler died with an unexpected error: %s" (timbre/stacktrace e)))
+         255)))))

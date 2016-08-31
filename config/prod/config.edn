@@ -1,0 +1,2 @@
+{:log-level :warn
+ :log-directory "/var/log/rammler"}

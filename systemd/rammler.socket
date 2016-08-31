@@ -1,0 +1,9 @@
+[Unit]
+Description=rammler Socket
+
+[Socket]
+ListenStream=5671
+ListenStream=5672
+
+[Install]
+WantedBy=sockets.target
