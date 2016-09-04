@@ -3,6 +3,7 @@
             [rammler.util :as util]
             [rammler.conf :as conf]
             [aleph.tcp :as tcp]
+            [aleph.netty :as netty]
             [gloss.io :refer [decode-stream decode encode]]
             [manifold.deferred :as d]
             [manifold.stream :as s]
@@ -101,7 +102,10 @@
       (d/catch (fn [e] (error "Exception" e) (s/close! s)))))
 
 (defonce server (atom nil))
+(defonce ssl-server (atom nil))
 
 (defn start-server []
-  (try (when @server (.close @server)) (catch Exception _))
-  (reset! server (tcp/start-server #'handler {:port 5672})))
+  (doseq [s [@server @ssl-server]]
+    (try (when s (.close s)) (catch Exception _)))
+  (reset! server (tcp/start-server #'handler {:port 5672}))
+  (reset! ssl-server (tcp/start-server #'handler {:port 5671 :ssl-context (netty/self-signed-ssl-context)})))
