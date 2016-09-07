@@ -6,5 +6,5 @@
     [& flags]
     (let [bitmask (zipmap powers-of-two flags)]
       (fn [n]
-        (->> (filter (complement #(zero? (bit-and n %))) (keys bitmask))
+        (->> (filter (complement #(zero? (bit-and (or n 0) %))) (keys bitmask))
              (select-keys bitmask) vals set)))))
