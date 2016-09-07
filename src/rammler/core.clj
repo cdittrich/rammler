@@ -1,6 +1,7 @@
 (ns rammler.core
   (:require [rammler.server :refer [start-server]]
             [rammler.conf :as conf]
+            [aleph.netty :as netty]
             [guns.cli.optparse :refer (parse)])
   (:import clojure.lang.ExceptionInfo)
   (:gen-class))
@@ -75,11 +76,12 @@ There is NO WARRANTY, to the extent permitted by law.")
   (conf/set-configuration!)
   (timbre/with-merged-config
     {:appenders {:println (assoc (timbre/println-appender {:stream :std-out}) :output-fn (comp force :msg_))}}
-    (System/exit
-     (try
-       (try (run args)
-            (catch ExceptionInfo e
-              (handle-cause e)))
-       (catch Exception e
-         (error (format "rammler died with an unexpected error: %s" (timbre/stacktrace e)))
-         255)))))
+    (try
+      (run args)
+      ; In 0.4.2 (netty/wait-for-close)
+      @(promise) ; Workaround
+      (catch ExceptionInfo e
+        (System/exit (handle-cause e)))
+      (catch Exception e
+        (error (format "rammler died with an unexpected error: %s" (timbre/stacktrace e)))
+        (System/exit 255)))))
