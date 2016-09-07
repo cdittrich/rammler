@@ -4,7 +4,12 @@
             [gloss.core :as gloss :refer :all]
             [gloss.io :refer [decode decode-stream encode]]
             [manifold.stream :as s]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+
+            [clojure.java.io :as io]
+            [cheshire.core :as json]))
+
+(def spec (json/parse-stream (io/reader (io/resource "amqp-rabbitmq-0.9.1.json")) true))
 
 (defmulti ^:private encode-field-value
   "Dispatch on type to determine the required prefix for AMQP field tables"
@@ -152,12 +157,8 @@
   "AMQP classes class-id -> keyword
 
   Also see the AMQP XML specification, 1.3. Class and Method ID Summaries"
-  {10 :connection
-   20 :channel
-   40 :exchange
-   50 :queue
-   60 :basic
-   90 :tx})
+  (into {} (for [{:keys [id name]} (spec :classes)]
+             [id (keyword name)])))
 
 (def amqp-classes-reverse
   "AMQP classes keyword -> class-id"
@@ -167,71 +168,23 @@
   "AMQP methods class -> method-id -> keyword
 
   Also see the AMQP XML specification, 1.3. Class and Method ID Summaries"
-  {:connection
-   {10 :start
-    11 :start-ok
-    20 :secure
-    21 :secure-ok
-    30 :tune
-    31 :tune-ok
-    40 :open
-    41 :open-ok
-    50 :close
-    51 :close-ok}
-   :channel
-   {10 :open
-    11 :open-ok
-    20 :flow
-    21 :flow-ok
-    40 :close
-    41 :close-ok}
-   :exchange
-   {10 :declare
-    11 :declare-ok
-    20 :delete
-    21 :delete-ok}
-   :queue
-   {10 :declare
-    11 :declare-ok
-    20 :bind
-    21 :bind-ok
-    50 :unbind
-    51 :unbind-ok
-    30 :purge
-    31 :purge-ok
-    40 :delete
-    41 :delete-ok}
-   :basic
-   {10 :qos
-    11 :qos-ok
-    20 :consume
-    21 :consume-ok
-    30 :cancel
-    31 :cancel-ok
-    40 :publish
-    50 :return
-    60 :deliver
-    70 :get
-    71 :get-ok
-    72 :get-empty
-    80 :ack
-    90 :reject
-    100 :recover-async
-    110 :recover
-    111 :recover-ok}
-   :tx
-   {10 :select
-    11 :select-ok
-    20 :commit
-    21 :commit-ok
-    30 :rollback
-    31 :rollback-ok}})
+  (into {} (for [{:keys [name methods]} (spec :classes)]
+             [(keyword name)
+              (into {} (for [{:keys [id name]} methods]
+                         [id (keyword name)]))])))
 
 (def amqp-methods-reverse
   "AMQP methods
 
   class -> keyword -> method-id"
   (into {} (for [[class methods] amqp-methods] [class (zipmap (vals methods) (keys methods))])))
+
+(comment
+  (into {}
+        (for [{:keys [name methods]} (amqp/spec :classes)]
+          [(keyword name)
+           (into {} (for [{:keys [name arguments]} methods]
+                      [(keyword name) (for [{:keys [name type]} arguments] [(keyword name) type])]))])))
 
 (def amqp-method-signatures
   "AMQP method signatures class -> method -> signature sequence

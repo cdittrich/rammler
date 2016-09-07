@@ -14,6 +14,7 @@
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all
                        :main rammler.core}
-             :dev  {:dependencies [[com.novemberain/langohr "3.6.1"]]
+             :dev  {:dependencies [[com.novemberain/langohr "3.6.1"]
+                                   [cheshire "5.6.3"]]
                     :resource-paths ["dev" "config/dev"]}
              :prod {:resource-paths ["config/prod"]}})
