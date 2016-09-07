@@ -4,8 +4,8 @@
             [taoensso.timbre :as timbre]
             [clojure.string :as str]))
 
-(def rabbit1-server "localhost")
-(def rabbit1-port 5673)
+(def rabbit1-server "rabbitmq")
+(def rabbit1-port 5672)
 
 (def server-capabilities
   [:publisher-confirms
