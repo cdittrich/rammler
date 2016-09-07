@@ -6,6 +6,6 @@ MAINTAINER https://lshift.de/
 RUN dnf -y install java-1.8.0-openjdk-headless; dnf clean all
 RUN alternatives --auto java
 RUN mkdir /var/log/rammler
-COPY ../target/uberjar/rammler-*-standalone.jar /rammler.jar
+COPY target/uberjar/rammler-*-standalone.jar /rammler.jar
 EXPOSE 5671 5672
 ENTRYPOINT ["java", "-jar", "rammler.jar"]
