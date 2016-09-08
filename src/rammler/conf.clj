@@ -2,7 +2,8 @@
   (:require [trptcolin.versioneer.core :refer [get-version]]
             [config.core :refer [env]]
             [taoensso.timbre :as timbre]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.java.io :as io]))
 
 (def rabbit1-server "rabbitmq")
 (def rabbit1-port 5672)
@@ -27,9 +28,11 @@
 (defn set-configuration!
   "Set the project configuration based on the environment"
   []
-  (timbre/set-level! (env :log-level))
   (let [dir (env :log-directory "")]
     (when-not (str/blank? dir)
-      (timbre/merge-config!
-       {:appenders
-        {:spit (timbre/spit-appender {:fname (format "%s/%s" dir "rammler.log")})}}))))
+      (if (.canWrite (io/file dir))
+        (timbre/merge-config!
+         {:appenders
+          {:spit (assoc (timbre/spit-appender {:fname (format "%s/%s" dir "rammler.log")})
+                        :min-level (env :log-level))}})
+        (throw (ex-info dir {:cause :log-unwritable}))))))
