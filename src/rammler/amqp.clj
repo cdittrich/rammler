@@ -4,7 +4,12 @@
             [gloss.core :as gloss :refer :all]
             [gloss.io :refer [decode decode-stream encode]]
             [manifold.stream :as s]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+
+            [clojure.java.io :as io]
+            [cheshire.core :as json]))
+
+(def spec (json/parse-stream (io/reader (io/resource "amqp-rabbitmq-0.9.1.json")) true))
 
 (defmulti ^:private encode-field-value
   "Dispatch on type to determine the required prefix for AMQP field tables"
@@ -115,6 +120,7 @@
 (defcodec- reply-text shortstr)
 (defcodec- any (repeated :byte :prefix :byte))
 (defcodec- bits octet)
+(defcodec- longlong long-long-uint)
 
 ;;; SASL
 (defcodec- sasl-plain (string :utf-8))
@@ -152,12 +158,8 @@
   "AMQP classes class-id -> keyword
 
   Also see the AMQP XML specification, 1.3. Class and Method ID Summaries"
-  {10 :connection
-   20 :channel
-   40 :exchange
-   50 :queue
-   60 :basic
-   90 :tx})
+  (into {} (for [{:keys [id name]} (spec :classes)]
+             [id (keyword name)])))
 
 (def amqp-classes-reverse
   "AMQP classes keyword -> class-id"
@@ -167,65 +169,10 @@
   "AMQP methods class -> method-id -> keyword
 
   Also see the AMQP XML specification, 1.3. Class and Method ID Summaries"
-  {:connection
-   {10 :start
-    11 :start-ok
-    20 :secure
-    21 :secure-ok
-    30 :tune
-    31 :tune-ok
-    40 :open
-    41 :open-ok
-    50 :close
-    51 :close-ok}
-   :channel
-   {10 :open
-    11 :open-ok
-    20 :flow
-    21 :flow-ok
-    40 :close
-    41 :close-ok}
-   :exchange
-   {10 :declare
-    11 :declare-ok
-    20 :delete
-    21 :delete-ok}
-   :queue
-   {10 :declare
-    11 :declare-ok
-    20 :bind
-    21 :bind-ok
-    50 :unbind
-    51 :unbind-ok
-    30 :purge
-    31 :purge-ok
-    40 :delete
-    41 :delete-ok}
-   :basic
-   {10 :qos
-    11 :qos-ok
-    20 :consume
-    21 :consume-ok
-    30 :cancel
-    31 :cancel-ok
-    40 :publish
-    50 :return
-    60 :deliver
-    70 :get
-    71 :get-ok
-    72 :get-empty
-    80 :ack
-    90 :reject
-    100 :recover-async
-    110 :recover
-    111 :recover-ok}
-   :tx
-   {10 :select
-    11 :select-ok
-    20 :commit
-    21 :commit-ok
-    30 :rollback
-    31 :rollback-ok}})
+  (into {} (for [{:keys [name methods]} (spec :classes)]
+             [(keyword name)
+              (into {} (for [{:keys [id name]} methods]
+                         [id (keyword name)]))])))
 
 (def amqp-methods-reverse
   "AMQP methods
@@ -233,43 +180,44 @@
   class -> keyword -> method-id"
   (into {} (for [[class methods] amqp-methods] [class (zipmap (vals methods) (keys methods))])))
 
+(defn- pack-bitmasks [arguments]
+  (mapcat (fn [coll] (let [[{:keys [type]}] coll]
+                       (if (= type "bit") 
+                         [{:name "bitmask" :domain "octet" :flags (map (comp keyword :name) coll) :default-value (map :default-value coll)}]
+                         coll)))
+          (partition-by #(= (% :type) "bit") arguments)))
+
+(defn- arguments-codec
+  "Compile codec for `arguments`"
+  [arguments]
+  (compile-frame
+   (for [{:keys [domain type] :as argument} arguments]
+     (eval (symbol (or domain type))))))
+
+(defn- postdecoder
+  "Create postdecoder from `arguments`"
+  [arguments]
+  (let [convert (map (fn [{:keys [name flags]}]
+                       (if (= name "bitmask") (flagfn flags) identity))
+                     arguments)]
+    (fn [values]
+      (into {} (map (fn [f {:keys [name]} value] [(keyword name) (f value)])
+                    convert arguments values)))))
+
 (def amqp-method-signatures
-  "AMQP method signatures class -> method -> signature sequence
-
-  Each signature tuple consists of `[field-name codec]'.
-
+  "AMQP method signatures class -> method -> signature
+  
   Also see the AMQP XML specification."
-  {:connection
-   {:start [[:version-major octet] [:version-minor octet] [:server-properties peer-properties] [:mechanisms longstr] [:locales longstr]]
-    :start-ok [[:client-properties peer-properties] [:mechanism shortstr] [:response longstr] [:locale shortstr]]
-    :secure [[:challenge longstr]]
-    :secure-ok [[:response longstr]]
-    :tune [[:channel-max short] [:frame-max long] [:heartbeat short]]
-    :tune-ok [[:channel-max short] [:frame-max long] [:heartbeat short]]
-    :open [[:virtual-host path] [:reversed-1 any] [:reserved-2 any]]
-    :open-ok [[:reserved-1 rest]]
-    :close [[:reply-code reply-code] [:reply-text reply-text] [:class-id class-id] [:method-id method-id]]
-    :close-ok []}
-
-   :channel
-   {:open [[:virtual-host path] #_[:reversed-1 any] #_[:reserved-2 any]]
-    :open-ok [[:reversed-1 rest]]
-    :close [[:reply-code reply-code] [:reply-text reply-text] [:class-id class-id] [:method-id method-id]]
-    :close-ok []}
-
-   :basic
-   {:publish [#_[:reserved-1 any] [:trash-1 octet] [:trash-2 octet] [:exchange exchange-name] [:routing-key shortstr] [:attributes bits] #_[:mandatory bit] #_[:immediate bit]]}})
-
-(def amqp-method-fields
-  "Remapping of AMQP method signatures to fields signature -> fields"
-  (into {} (for [[class-id class] amqp-classes [method-id method] (amqp-methods class)
-                 :let [signature (get-in amqp-method-signatures [class method])]]
-             [[class-id method-id] (if signature (map first signature) :not-implemented)])))
-
-(def amqp-method-codecs
-  "Remapping of AMQP method signatures to frames signature -> codec"
-  (into {} (for [[class-id class] amqp-classes [method-id method] (amqp-methods class)]
-             [[class-id method-id] (compile-frame (map second (get-in amqp-method-signatures [class method])))])))
+  (into {}
+        (for [{:keys [name methods]} (spec :classes)]
+          [(keyword name)
+           (into {} (for [{:keys [name arguments] :as method} methods
+                          :let [arguments (pack-bitmasks arguments)]]
+                      [(keyword name) (merge method
+                                             {:arguments arguments
+                                              :fields (map (comp keyword :name) arguments)
+                                              :codec (arguments-codec arguments)
+                                              :postdecoder (postdecoder arguments)})]))])))
 
 (defmulti decode-frame
   "Further decode the payload of a decoded AMQP frame
@@ -285,16 +233,14 @@
 (defmethod decode-frame :method [[_ channel payload]]
   (let [[class-id method-id arguments] (decode [class-id method-id rest] (byte-array payload))
         class (amqp-classes class-id)
-        method [class-id method-id]
-        fields (amqp-method-fields method)]
+        method (get-in amqp-methods [class method-id])
+        {:keys [postdecoder codec]} (get-in amqp-method-signatures [class method])]
     {:type :method
      :channel channel
      :class class
-     :method (get-in amqp-methods [class method-id])
-     :payload (if (= fields :not-implemented)
-                {:not-implemented arguments}
-                (try (zipmap fields (decode (amqp-method-codecs method) (byte-array arguments)))
-                     (catch Exception _ {:error arguments})))}))
+     :method method
+     :payload (try (postdecoder (decode codec (byte-array arguments)))
+                   (catch Exception _ {:error arguments}))}))
 
 (defmethod decode-frame :header [[frame-type channel payload]]
   {:type :header
@@ -325,12 +271,12 @@
   :type)
 
 (defmethod encode-frame :method [{:keys [channel class method payload]}]
-  (let [id [(amqp-classes-reverse class) (get-in amqp-methods-reverse [class method])]]
+  (let [id [(amqp-classes-reverse class) (get-in amqp-methods-reverse [class method])]
+        {:keys [fields codec]} (get-in amqp-method-signatures [class method])]
     (encode amqp-frame [1 channel
                         (decode rest
                                 (concat (encode [class-id method-id] id)
-                                        (encode (amqp-method-codecs id)
-                                                (map payload (amqp-method-fields id)))))
+                                        (encode codec (map payload fields))))
                         (.byteValue 0xCE)])))
 
 (defmulti postdecode
@@ -343,9 +289,6 @@
   (defmethod postdecode [:connection :start-ok] [frame]
     (update-in frame [:payload :response]
                #(zipmap [:authcid :authzid :passwd] (str/split % null-regex)))))
-
-(defmethod postdecode [:basic :publish] [frame]
-  (update-in frame [:payload :attributes] (flagfn :mandatory :immediate)))
 
 (defn decode-amqp-frame
   "Fully decode AMQP `frame`"

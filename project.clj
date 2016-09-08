@@ -10,7 +10,8 @@
                  [camel-snake-kebab "0.4.0"]
                  [guns.cli/optparse "1.1.2"]
                  [com.taoensso/timbre "4.7.4"]
-                 [yogthos/config "0.8"]]
+                 [yogthos/config "0.8"]
+                 [cheshire "5.6.3"]]
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all
                        :main rammler.core}
