@@ -2,19 +2,19 @@
   (:require [rammler.server :refer [start-server]]
             [rammler.conf :as conf]
             [aleph.netty :as netty]
-            [guns.cli.optparse :refer (parse)])
+            [guns.cli.optparse :refer (parse)]
+            [clojure.java.io :as io]
+            [clojure.java.jdbc :as jdbc]
+            [clojure.string :as str])
   (:import clojure.lang.ExceptionInfo)
   (:gen-class))
 
 (taoensso.timbre/refer-timbre)
 
 (def cli-options
-  [["-h" "--help"    "Display this help and exit"]
-   [nil  "--version" "Output version information and exit"]
-   ["-q" "--quiet"   "Mute output"]
-   ["-v" "--verbose" "Verbose output"]
-   [nil  "--debug"   "Debugging output (takes precedence over --verbose)"]
-   [nil  "--trace"   "Tracing output (takes precedence over --verbose and --debug)"]])
+  [["-h" "--help"        "Display this help and exit"]
+   [nil  "--version"     "Output version information and exit"]
+   ["-c" "--config FILE" "Location of configuration file" :default (io/file conf/default-config) :parse-fn io/file]])
 
 (def agpl-notice "License AGPLv3+: GNU Affero General Public License version 3 or later <https://www.gnu.org/licenses/agpl-3.0.en.html>
 This is free software: you are free to change and redistribute it.
@@ -37,18 +37,6 @@ There is NO WARRANTY, to the extent permitted by law.")
   (println conf/copyright)
   (println agpl-notice))
 
-(defn handle-options
-  "Handle side effects of command line `options`"
-  [options]
-  (if (options :quiet)
-    (timbre/merge-config! {:appenders {:println {}}})
-    (let [level (or (some (set (map first (filter second options))) [:trace :debug :verbose])
-                    :info)]
-      (timbre/merge-config!
-       {:appenders {:println (assoc (timbre/println-appender {:stream :std-out})
-                                    :output-fn (comp force :msg_)
-                                    :min-level level)}}))))
-
 (defn parse-args
   "Optparse `args` and handle exceptions"
   [args]
@@ -56,15 +44,26 @@ There is NO WARRANTY, to the extent permitted by law.")
        (catch AssertionError e
          (throw (ex-info (.getMessage e) {:cause :cli-parser-error})))))
 
+(defn strategy-resolver
+  "Create resolver fn from `config`"
+  [config]
+  (let [{:keys [strategy database-url database-query static-host static-port]} config]
+    (case strategy
+      :database (fn [user] (first (jdbc/query database-url (str/replace database-query "$user" user))))
+      :static (constantly {:host static-host :port static-port}))))
+
 (defn run
   "Attempt to run rammler from `args`"
   [args]
-  (conf/set-configuration!)
-  (let [[options args banner] (parse-args args)]
-    (handle-options options)
-    (or (cond (:help options) (print-usage banner)
-              (:version options) (print-version)
-              :default (start-server))
+  (let [[{:keys [help version config]} args banner] (parse-args args)]
+    (or (cond help (print-usage banner)
+              version (print-version)
+              :default (let [config (if config (conf/read-config (io/file config)) (conf/read-config))
+                             resolver (strategy-resolver config)]
+                         (conf/process-config! config)
+                         (let [interfaces (start-server resolver config)]
+                           (info (format "rammler is now running on %s"
+                                   (str/join ", " (map (partial str/join ":") interfaces)))))))
         0)))
 
 (defn handle-cause
@@ -72,10 +71,17 @@ There is NO WARRANTY, to the extent permitted by law.")
   [^ExceptionInfo e]
   (let [{:keys [cause]} (ex-data e)
         [msg code] (case cause
-                     :cli-parser-error ["Command line error" 5]
-                     :log-unwritable ["Can't write to log output directory" 6]
+                     :no-configuration ["Configuration file doesn't exist" 1]
+                     :unreadable-configuration ["Can't open configuration for reading" 1]
+                     :wrong-configuration-type ["Configuration isn't a regular file" 1]
+                     :configuration-parse-error ["Configuration parse error" 1]
+                     :missing-configuration-option ["Option missing from configuration" 1]
+                     :unknown-configuration-option ["Unknown configuration option" 1]
+                     :configuration-error ["Configuration error" 2]
+                     :cli-parser-error ["Command line error" 3]
+                     :log-unwritable ["Can't write to log output directory" 4]
                      ["Unknown error" 255])]
-    (error (format "%s: %s" msg (.getMessage e)))
+    (fatal (format "%s: %s" msg (.getMessage e)))
     (trace (timbre/stacktrace e))
     code))
 
@@ -94,6 +100,6 @@ There is NO WARRANTY, to the extent permitted by law.")
     (catch ExceptionInfo e
       (System/exit (handle-cause e)))
     (catch Exception e
-      (error (format "rammler died with an unexpected error: %s" (.getMessage e)))
+      (fatal (format "rammler died with an unexpected error: %s" (.getMessage e)))
       (trace (timbre/stacktrace e))
       (System/exit 255))))

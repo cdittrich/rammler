@@ -8,3 +8,9 @@
       (fn [n]
         (->> (filter (complement #(zero? (bit-and (or n 0) %))) (keys bitmask))
              (select-keys bitmask) vals set)))))
+
+(defn inet-address [s]
+  (java.net.InetAddress/getByName s))
+
+(defn socket-address [address port]
+  (java.net.InetSocketAddress. (inet-address address) port))

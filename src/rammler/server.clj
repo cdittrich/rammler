@@ -99,7 +99,7 @@
                 (fn [{:keys [type class method] :as frame}]
                   (s/consume #(debug "Client" (pr-str %)) s')
                   (if (= [type class method] [:method :connection :start-ok])
-                    (handle-method-frame (s/splice s s'') info frame)
+                    (handle-method-frame {:stream (s/splice s s'') :info info :resolver resolver} frame)
                     (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
                                                           :got (select-keys frame [type class method])})))))))))
       (d/catch (fn [e] (error "Exception" e) (s/close! s))))))
@@ -107,8 +107,19 @@
 (defonce server (atom nil))
 (defonce ssl-server (atom nil))
 
-(defn start-server [resolver]
-  (doseq [s [@server @ssl-server]]
-    (try (when s (.close s)) (catch Exception _)))
-  (reset! server (tcp/start-server #'handler {:port 5672}))
-  (reset! ssl-server (tcp/start-server #'handler {:port 5671 :ssl-context (netty/self-signed-ssl-context)})))
+(defn start-server
+  ([resolver {:keys [port ssl-port interface ssl-interface]}]
+   (doseq [s [@server @ssl-server]]
+     (try (when s (.close s)) (catch Exception _)))
+   (let [f (handler resolver)
+         listen? (and interface port)
+         listen-ssl? (and ssl-interface ssl-port)]
+     (when listen?
+       (reset! server (tcp/start-server f {:socket-address (util/socket-address interface port)})))
+     (when listen-ssl?
+       (reset! ssl-server (tcp/start-server f {:socket-address (util/socket-address ssl-interface ssl-port) :ssl-context (netty/self-signed-ssl-context)})))
+     (when-not (or listen? listen-ssl?)
+       (throw (ex-info "Configured to not listen on any interfaces" {:cause :configuration-error})))
+     (filter identity [(when listen? [interface port])
+                       (when listen-ssl? [ssl-interface ssl-port])])))
+  ([resolver] (start-server resolver {:port 5672 :ssl-port 5671 :interface "0.0.0.0" :ssl-interface "0.0.0.0"})))

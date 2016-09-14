@@ -10,15 +10,12 @@
                  [camel-snake-kebab "0.4.0"]
                  [guns.cli/optparse "1.1.2"]
                  [com.taoensso/timbre "4.7.4"]
-                 [yogthos/config "0.8"]
                  [cheshire "5.6.3"]
-                 [org.clojure/java.jdbc "0.6.2-alpha3"]
-                 [org.postgresql/postgresql "9.4.1210"]
-                 [org.xerial/sqlite-jdbc "3.8.11.2"]]
+                 [org.clojure/java.jdbc "0.6.2-alpha3"]]
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all
                        :main rammler.core}
              :dev  {:dependencies [[com.novemberain/langohr "3.6.1"]
                                    [org.apache.derby/derby "10.12.1.1"]]
-                    :resource-paths ["dev" "config/dev"]}
-             :prod {:resource-paths ["config/prod"]}})
+                    :resource-paths ["dev" "config"]}
+             :prod {}})
