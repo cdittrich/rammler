@@ -7,7 +7,7 @@
  :strategy :static
  ; :database-url ""
  ; :database-query ""
- :static-host "rabbitmq:5672" 
+ :static-host "rabbitmq"
  :static-port 5672
  :capabilities [:publisher-confirms
                 :per-consumer-qos
