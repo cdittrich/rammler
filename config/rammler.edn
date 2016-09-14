@@ -1,0 +1,20 @@
+{:log-level :info
+ :log-directory "/var/log/rammler"
+ :port 5672
+ :ssl-port 5671
+ :interface "0.0.0.0"
+ :ssl-interface "0.0.0.0"
+ :strategy :static
+ ; :database-url ""
+ ; :database-query ""
+ :static-host "rabbitmq"
+ :static-port 5672
+ :capabilities [:publisher-confirms
+                :per-consumer-qos
+                :exchange-exchange-bindings
+                :authentication-failure-close
+                :connection.blocked
+                :consumer-cancel-notify
+                :basic.nack
+                :direct-reply-to
+                :consumer-priorities]}
