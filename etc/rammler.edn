@@ -5,8 +5,12 @@
  :interface "0.0.0.0"
  :ssl-interface "0.0.0.0"
  :strategy :static
- ; :database-url ""
- ; :database-query ""
+ #_:database-spec #_{:subprotocol "postgresql"
+                     :subname "//localhost:5432/database"
+                     :user "user"
+                     :password "password"}
+ #_:database-spec #_"postgresql://@localhost:5432/database?user=user&password=password"
+ #_:database-query #_"select * from host where user = '$user'"
  :static-host "rabbitmq"
  :static-port 5672
  :capabilities [:publisher-confirms
@@ -18,3 +22,4 @@
                 :basic.nack
                 :direct-reply-to
                 :consumer-priorities]}
+n

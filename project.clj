@@ -18,4 +18,5 @@
              :dev  {:dependencies [[com.novemberain/langohr "3.6.1"]
                                    [org.apache.derby/derby "10.12.1.1"]]
                     :resource-paths ["dev" "config"]}
-             :prod {}})
+             :prod {}
+             :postgresql {:dependencies [[org.postgresql/postgresql "9.4.1210"]]}})
