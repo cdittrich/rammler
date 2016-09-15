@@ -7,7 +7,7 @@
             [clojure.set :as set]
             [rammler.util :as util]))
 
-(def server-capabilities
+(def default-server-capabilities
   [:publisher-confirms
    :per-consumer-qos
    :exchange-exchange-bindings
