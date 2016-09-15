@@ -7,20 +7,19 @@
             [gloss.io :refer [decode-stream decode encode]]
             [manifold.deferred :as d]
             [manifold.stream :as s]
-            [camel-snake-kebab.core :refer [->snake_case_string]]
-            [taoensso.timbre :as timbre
-             :refer (log  trace  debug  info  warn  error  fatal  report
-                     logf tracef debugf infof warnf errorf fatalf reportf
-                     spy get-env log-env)]))
+            [camel-snake-kebab.core :refer :all]
+            [camel-snake-kebab.extras :refer [transform-keys]]))
 
-(defn send-start [stream]
+(taoensso.timbre/refer-timbre)
+
+(defn send-start [stream capabilities]
   (s/put! stream (amqp/encode-frame {:type :method
                                      :channel 0
                                      :class :connection
                                      :method :start
                                      :payload {:version-major 0
                                                :version-minor 9
-                                               :server-properties {"capabilities" (zipmap (map ->snake_case_string conf/server-capabilities) (repeat true))
+                                               :server-properties {"capabilities" (zipmap (map ->snake_case_string capabilities) (repeat true))
                                                                    "cluster_name" "rabbit@broker1.adorno.in.lshift.de"
                                                                    "copyright" conf/copyright
                                                                    "information" conf/license
@@ -84,7 +83,7 @@
   There is no hand-shaking for errors on connections that are not fully open. Following successful protocol
   header negotiation, which is defined in detail later, and prior to sending or receiving Open or Open-Ok, a
   peer that detects an error MUST close the socket without sending any further data."
-  [resolver]
+  [resolver capabilities]
   (fn [s info]
     (-> (s/take! s)
       (d/chain (partial decode amqp/amqp-header)
@@ -94,7 +93,7 @@
             (let [s' (amqp/decode-amqp-stream s)
                   s'' (s/stream)]
               (s/connect s s'')
-              (d/chain (send-start s) (fn [_] (s/take! s'))
+              (d/chain (send-start s capabilities) (fn [_] (s/take! s'))
                 (fn [{:keys [type class method] :as frame}]
                   (s/consume #(debug "Client" (pr-str %)) s')
                   (if (= [type class method] [:method :connection :start-ok])
@@ -107,10 +106,10 @@
 (defonce ssl-server (atom nil))
 
 (defn start-server
-  ([resolver {:keys [port ssl-port interface ssl-interface]}]
+  ([resolver {:keys [port ssl-port interface ssl-interface capabilities]}]
    (doseq [s [@server @ssl-server]]
      (try (when s (.close s)) (catch Exception _)))
-   (let [f (handler resolver)
+   (let [f (handler resolver capabilities)
          listen? (and interface port)
          listen-ssl? (and ssl-interface ssl-port)]
      (when listen?
@@ -121,4 +120,4 @@
        (throw (ex-info "Configured to not listen on any interfaces" {:cause :configuration-error})))
      (filter identity [(when listen? [interface port])
                        (when listen-ssl? [ssl-interface ssl-port])])))
-  ([resolver] (start-server resolver {:port 5672 :ssl-port 5671 :interface "0.0.0.0" :ssl-interface "0.0.0.0"})))
+  ([resolver] (start-server resolver {:port 5672 :ssl-port 5671 :interface "0.0.0.0" :ssl-interface "0.0.0.0" :capabilities conf/default-server-capabilities})))
