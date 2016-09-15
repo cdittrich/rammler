@@ -5,9 +5,10 @@
             [gloss.io :refer [decode decode-stream encode]]
             [manifold.stream :as s]
             [clojure.string :as str]
-
             [clojure.java.io :as io]
-            [cheshire.core :as json]))
+            [cheshire.core :as json]
+            [camel-snake-kebab.core :refer [->kebab-case-keyword]]
+            [camel-snake-kebab.extras :refer [transform-keys]]))
 
 (def spec (json/parse-stream (io/reader (io/resource "amqp-rabbitmq-0.9.1.json")) true))
 
@@ -76,13 +77,18 @@
 (defcodec- channel short)
 (defcodec- frame-end octet)
 
- ; Solve circular dependency table-value-types -> field-table -> field-value-pair -> field-value -> table-value-types
+; Solve circular dependency table-value-types -> field-table -> field-value-pair -> field-value -> table-value-types
 (declare table-value-types)
 (defcodec- field-value (header octet (comp #'table-value-types char) (comp int encode-field-value)))
 (defcodec- field-array (repeated field-value :prefix long-int))
 (defcodec- field-name shortstr)
 (defcodec- field-value-pair [field-name field-value])
 (defcodec- field-table (finite-frame long-uint (repeated field-value-pair :prefix :none))
+  seq
+  (partial into {}))
+
+; Exception for AMQPLAIN authentication; field table has known length
+(defcodec- field-table-amqplain (repeated field-value-pair :prefix :none)
   seq
   (partial into {}))
 
@@ -286,9 +292,15 @@
 (defmethod postdecode :default [x] x)
 
 (let [null-regex (re-pattern (str (char 0)))]
-  (defmethod postdecode [:connection :start-ok] [frame]
-    (update-in frame [:payload :response]
-               #(zipmap [:authcid :authzid :passwd] (str/split % null-regex)))))
+  (defmethod postdecode [:connection :start-ok] [{:keys [payload] :as frame}]
+    (case (payload :mechanism)
+      "PLAIN" (update-in frame [:payload :response]
+                #(zipmap [:cid :login :password] (str/split % null-regex)))
+      "AMQPLAIN" (update-in frame [:payload :response]
+                   #(transform-keys ->kebab-case-keyword
+                      (decode field-table-amqplain
+                        (byte-array (decode rest %)))))
+      (throw (ex-info (payload :mechanism) {:cause :unsupported-authentication-type})))))
 
 (defn decode-amqp-frame
   "Fully decode AMQP `frame`"
