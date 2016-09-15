@@ -37,7 +37,7 @@
    :interface {:parser util/inet-address}
    :ssl-interface {:parser util/inet-address}
    :strategy {:required true :verificator #{:database :static}}
-   :database-url {:parser #(java.net.URL. %)}
+   :database-spec {}
    :database-query {:verificator string?}
    :static-host {:verificator string?}
    :static-port {:verificator integer?}
@@ -74,8 +74,8 @@
 
 (defn- check-strategy [config]
   (case (config :strategy)
-    :database (when-not (and (config :database-url) (config :database-query))
-                (throw-configuration-error ":database strategy requires database-url and database-query to be set"))
+    :database (when-not (and (config :database-spec) (config :database-query))
+                (throw-configuration-error ":database strategy requires database-spec and database-query to be set"))
     :static (when-not (and (config :static-host) (config :static-port))
               (throw-configuration-error ":static strategy requires static-host and static-port to be set")))
   config)

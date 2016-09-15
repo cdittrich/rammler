@@ -5,8 +5,12 @@
  :interface "0.0.0.0"
  :ssl-interface "0.0.0.0"
  :strategy :static
- ; :database-url ""
- ; :database-query ""
+ #_:database-spec #_{:classname "org.postgresql.Driver"
+                     :subprotocol "postgresql"
+                     :subname "//localhost:5432/database"
+                     :user "user"
+                     :password "password"}
+ #_:database-query "select * from host where user = '$user'"
  :static-host "rabbitmq"
  :static-port 5672
  :capabilities [:publisher-confirms

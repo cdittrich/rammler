@@ -47,9 +47,9 @@ There is NO WARRANTY, to the extent permitted by law.")
 (defn strategy-resolver
   "Create resolver fn from `config`"
   [config]
-  (let [{:keys [strategy database-url database-query static-host static-port]} config]
+  (let [{:keys [strategy database-spec database-query static-host static-port]} config]
     (case strategy
-      :database (fn [user] (first (jdbc/query database-url (str/replace database-query "$user" user))))
+      :database (fn [user] (first (jdbc/query database-spec (str/replace database-query "$user" user))))
       :static (constantly {:host static-host :port static-port}))))
 
 (defn run
