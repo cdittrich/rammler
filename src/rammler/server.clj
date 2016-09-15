@@ -35,13 +35,13 @@
   (error "Unhandled method frame" frame))
 
 (defmethod handle-method-frame [:connection :start-ok] [{:keys [stream info resolver]} {:keys [payload] :as frame}]
-  (let [{:keys [client-properties] {:keys [authzid]} :response} payload
+  (let [{:keys [client-properties] {:keys [login]} :response} payload
         {:keys [remote-addr server-port server-name]} info]
     (println (format "New Connection from %s (%s %s) -> %s@%s:%d"
                remote-addr (client-properties "product") (client-properties "version")
-               authzid server-name server-port))
+               login server-name server-port))
     (debug "Client" frame)
-    (if-let [server (resolver authzid)]
+    (if-let [server (resolver login)]
       (d/let-flow [conn (tcp/client server)]
        (d/chain (s/put! conn (encode amqp/amqp-header ["AMQP" 0 0 9 1]))
          (fn [_] (s/take! conn))
@@ -52,7 +52,7 @@
            (s/connect stream conn)
            (s/connect conn stream)
            (s/consume #(debug "Server" (pr-str %)) (amqp/decode-amqp-stream conn)))))
-      (throw (ex-info "Unresolvable username" {:user authzid})))))
+      (throw (ex-info "Unresolvable username" {:user login})))))
 
 (defn handler
   "Handle incoming AMQP 0.9.1 connections
