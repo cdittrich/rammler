@@ -10,7 +10,7 @@
                      :subname "//localhost:5432/database"
                      :user "user"
                      :password "password"}
- #_:database-query "select * from host where user = '$user'"
+ #_:database-query #_"select * from host where user = '$user'"
  :static-host "rabbitmq"
  :static-port 5672
  :capabilities [:publisher-confirms
