@@ -5,7 +5,8 @@
             [clojure.java.io :as io]
             [clojure.edn :as edn]
             [clojure.set :as set]
-            [rammler.util :as util]))
+            [rammler.util :as util]
+            [clojure.spec :as s]))
 
 (def default-server-capabilities
   [:publisher-confirms
@@ -25,74 +26,90 @@
 (def version (get-version "lshift-de" "rammler"))
 (def default-config "/etc/rammler.edn")
 
-(defn- writable-directory? [^java.io.File file]
-  (or (and (.exists file) (.isDirectory file) (.canWrite file))
-    (throw (ex-info (str file) {:cause :log-unwritable}))))
+;; spec
 
-(def config-options
-  {:log-level {:verificator timbre/-levels-set}
-   :log-directory {:parser io/file :verificator writable-directory?}
-   :port {:verificator integer?}
-   :ssl-port {:verificator integer?}
-   :interface {:parser util/inet-address}
-   :ssl-interface {:parser util/inet-address}
-   :strategy {:required true :verificator #{:database :static}}
-   :database-spec {}
-   :database-query {:verificator string?}
-   :static-host {:verificator string?}
-   :static-port {:verificator integer?}
-   :capabilities {:required true}})
+(defn- writable-directory?
+  "Does `s` correspond to a writable directory?"
+  [s]
+  (let [file (if (instance? java.io.File s) s (io/file s))]
+    (if (and (.exists file) (.isDirectory file) (.canWrite file))
+      file
+      :clojure.spec/invalid)))
+
+(defn- valid-interface?
+  "Does `s` correspond to a valid interface?"
+  [s]
+  (if (instance? java.net.InetAddress s)
+    s
+    (try (util/inet-address s)
+         (catch Exception _ :clojure.spec/invalid))))
+
+(s/def ::base-config
+  (s/keys
+    :opt-un [::log-level ::log-directory ::port ::ssl-port ::interface ::ssl-interface]
+    :req-un [::strategy ::capabilities]))
+
+(defmulti strategy-type :strategy)
+(defmethod strategy-type :database [_]
+  (s/merge ::base-config (s/keys :req-un [::database])))
+(defmethod strategy-type :static [_]
+  (s/merge ::base-config (s/keys :req-un [::static])))
+
+(s/def ::config (s/multi-spec strategy-type :strategy))
+
+(s/def ::log-level timbre/-levels-set)
+(s/def ::log-directory (s/conformer writable-directory?))
+(s/def ::port integer?)
+(s/def ::ssl-port integer?)
+(s/def ::interface (s/conformer valid-interface?))
+(s/def ::ssl-interface (s/conformer valid-interface?))
+
+(s/def ::database
+  (s/keys :req-un [:rammler.conf.database/spec :rammler.conf.database/query]))
+(s/def ::static (s/keys :req-un [:rammler.conf.static/host :rammler.conf.static/port]))
+
+(s/def :rammler.conf.database/spec
+  (s/keys :req-un [:rammler.conf.database.spec/subprotocol :rammler.conf.database.spec/subname
+                   :rammler.conf.database.spec/user :rammler.conf.database.spec/password]))
+(s/def :rammler.conf.database/query string?)
+
+(s/def :rammler.conf.database.spec/subprotocol string?)
+(s/def :rammler.conf.database.spec/subname string?)
+(s/def :rammler.conf.database.spec/user string?)
+(s/def :rammler.conf.database.spec/password string?)
+(s/def :rammler.conf.static/host string?)
+(s/def :rammler.conf.static/port integer?)
+
+(s/def ::capabilities (s/coll-of keyword?))
+
+(s/def ::config
+  (s/keys
+    :opt-un [::log-level ::log-directory ::port ::ssl-port ::interface ::ssl-interface ::database ::static]
+    :req-un [::strategy ::capabilities]))
+
+;; EDN reading
 
 (defn- pushback-reader [o]
   (java.io.PushbackReader. o))
 
-(defn read-config
-  ([^java.io.File file]
-   (cond (not (.exists file)) (throw (ex-info (str file) {:cause :no-configuration}))
-         (not (.canRead file)) (throw (ex-info (str file) {:cause :unreadable-configuration}))
-         (not (.isFile file)) (throw (ex-info (str file) {:cause :wrong-configuration-type}))
-         :default (with-open [r (io/reader file)
-                              pr (pushback-reader r)]
-                    (try (edn/read pr)
-                         (catch Exception e
-                           (throw (ex-info file {:cause :configuration-parse-error} e)))))))
-  ([] (read-config (io/file default-config))))
+(defn- read-config [^java.io.File file]
+  (cond (not (.exists file)) (throw (ex-info (str file) {:cause :no-configuration}))
+        (not (.canRead file)) (throw (ex-info (str file) {:cause :unreadable-configuration}))
+        (not (.isFile file)) (throw (ex-info (str file) {:cause :wrong-configuration-type}))
+        :default (with-open [r (io/reader file)
+                             pr (pushback-reader r)]
+                   (try (edn/read pr)
+                        (catch Exception e
+                          (throw (ex-info file {:cause :configuration-parse-error} e)))))))
 
-(defn- check-unknown-keys [config]
-  (let [unknown-keys (set/difference (set (keys config)) (set (keys config-options)))]
-    (when (seq unknown-keys)
-      (throw (ex-info (pr-str unknown-keys) {:cause :unknown-configuration-options})))))
-
-(defn- check-missing-keys [config]
-  (let [missing-keys (set/difference (set (keys (filter (comp :required second) config-options)))
-                       (set (keys config)))]
-    (when (seq missing-keys)
-      (throw (ex-info (pr-str missing-keys) {:cause :missing-configuration-options})))))
-
-(defn- throw-configuration-error [msg]
-  (throw (ex-info msg {:cause :configuration-error})))
-
-(defn- check-strategy [config]
-  (case (config :strategy)
-    :database (when-not (and (config :database-spec) (config :database-query))
-                (throw-configuration-error ":database strategy requires database-spec and database-query to be set"))
-    :static (when-not (and (config :static-host) (config :static-port))
-              (throw-configuration-error ":static strategy requires static-host and static-port to be set")))
-  config)
-
-(defn load-config [config]
-  (check-unknown-keys config)
-  (check-missing-keys config)
-  (check-strategy
-    (into {}
-      (filter identity
-        (for [[option {:keys [parser verificator]
-                       :or {parser identity verificator (constantly true)}}] config-options]
-          (if-let [value (config option)]
-            (let [value (parser value)]
-              (if (not (verificator value))
-                (throw-configuration-error (format "%s: %s" (name option) value))
-                [option value]))))))))
+(defn load-config
+  ([s]
+   (let [config (read-config s)
+         config' (s/conform ::config config)]
+     (if (= config' :clojure.spec/invalid)
+       (throw (ex-info (s/explain-str ::config config) {:cause :configuration-error}))
+       config')))
+  ([] (load-config default-config)))
 
 (defn process-config! [{:keys [log-level log-directory]}]
   (if log-level
