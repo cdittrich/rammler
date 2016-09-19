@@ -260,7 +260,7 @@
    :channel channel
    :payload payload})
 
-(defmethod decode-frame :heartbeat [_] {:type :heatbeat})
+(defmethod decode-frame :heartbeat [_] {:type :heartbeat})
 
 (defn validate-frame
   "Validate decoded AMQP frame
