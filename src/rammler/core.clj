@@ -47,10 +47,10 @@ There is NO WARRANTY, to the extent permitted by law.")
 (defn strategy-resolver
   "Create resolver fn from `config`"
   [config]
-  (let [{:keys [strategy database-spec database-query static-host static-port]} config]
+  (let [{:keys [strategy database static]} config]
     (case strategy
-      :database (fn [user] (first (jdbc/query database-spec (str/replace database-query "$user" user))))
-      :static (constantly {:host static-host :port static-port}))))
+      :database (fn [user] (first (jdbc/query (database :spec) (str/replace (database :query) "$user" user))))
+      :static (constantly static))))
 
 (defn run
   "Attempt to run rammler from `args`"
