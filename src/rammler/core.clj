@@ -56,15 +56,14 @@ There is NO WARRANTY, to the extent permitted by law.")
   "Attempt to run rammler from `args`"
   [args]
   (let [[{:keys [help version config]} args banner] (parse-args args)]
-    (or (cond help (print-usage banner)
-              version (print-version)
-              :default (let [config (if config (conf/read-config (io/file config)) (conf/read-config))
-                             resolver (strategy-resolver config)]
-                         (conf/process-config! config)
-                         (let [interfaces (start-server resolver config)]
-                           (info (format "rammler is now running on %s"
-                                   (str/join ", " (map (partial str/join ":") interfaces)))))))
-        0)))
+    (cond help (do (print-usage banner) :exit)
+          version (do (print-version) :exit)
+          :default (let [config (if config (conf/load-config (io/file config)) (conf/load-config))
+                         resolver (strategy-resolver config)]
+                     (conf/process-config! config)
+                     (let [interfaces (start-server resolver config)]
+                       (info (format "rammler is now running on %s"
+                               (str/join ", " (map (partial str/join ":") interfaces)))))))))
 
 (defn handle-cause
   "Handle ExceptionInfo exceptions"
@@ -88,15 +87,16 @@ There is NO WARRANTY, to the extent permitted by law.")
 (defn -main
   "Set defaults and run rammler"
   [& args]
-  (timbre/set-level! :trace)
+  (timbre/set-level! :debug)
   (timbre/merge-config!
    {:appenders {:println (assoc (timbre/println-appender {:stream :std-out})
                                 :output-fn (comp force :msg_)
                                 :min-level nil)}})
   (try
-    (run args)
-    ; In 0.4.2 (netty/wait-for-close)
-    @(promise) ; Workaround
+    (if (= (run args) :exit)
+      (System/exit 0)
+      ; In 0.4.2 (netty/wait-for-close)
+      @(promise)) ; Workaround
     (catch ExceptionInfo e
       (System/exit (handle-cause e)))
     (catch Exception e
