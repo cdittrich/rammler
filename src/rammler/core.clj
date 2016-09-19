@@ -62,8 +62,8 @@ There is NO WARRANTY, to the extent permitted by law.")
                          resolver (strategy-resolver config)]
                      (conf/process-config! config)
                      (let [interfaces (start-server resolver config)]
-                       (info (format "rammler is now running on %s"
-                               (str/join ", " (map (partial str/join ":") interfaces)))))))))
+                       (println (format "rammler is now running on %s"
+                                  (str/join ", " (map (partial str/join ":") interfaces)))))))))
 
 (defn handle-cause
   "Handle ExceptionInfo exceptions"
