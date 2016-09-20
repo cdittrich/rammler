@@ -1,4 +1,8 @@
-(defproject lshift-de/rammler "0.1.0-SNAPSHOT"
+(def version "0.1.0")
+(def pre-release "-pre")
+(def build (if-let [n (System/getenv "BUILD_NUMBER")] (str "+build." n) ""))
+
+(defproject lshift-de/rammler (str version pre-release build)
   :description "RabbitMQ Proxy"
   :url "https://github.com/lshift-de/rammler"
   :license {:name "AGPLv3+"

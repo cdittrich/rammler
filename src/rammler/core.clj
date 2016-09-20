@@ -62,7 +62,8 @@ There is NO WARRANTY, to the extent permitted by law.")
                          resolver (strategy-resolver config)]
                      (conf/process-config! config)
                      (let [interfaces (start-server resolver config)]
-                       (infof "rammler running and listening on %s"
+                       (infof "rammler (%s) running and listening on %s"
+                         conf/version
                          (str/join ", " (map (partial str/join ":") interfaces))))))))
 
 (defn handle-cause
