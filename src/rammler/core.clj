@@ -62,8 +62,8 @@ There is NO WARRANTY, to the extent permitted by law.")
                          resolver (strategy-resolver config)]
                      (conf/process-config! config)
                      (let [interfaces (start-server resolver config)]
-                       (println (format "rammler is now running on %s"
-                                  (str/join ", " (map (partial str/join ":") interfaces)))))))))
+                       (infof "rammler running and listening on %s"
+                         (str/join ", " (map (partial str/join ":") interfaces))))))))
 
 (defn handle-cause
   "Handle ExceptionInfo exceptions"
@@ -104,6 +104,6 @@ There is NO WARRANTY, to the extent permitted by law.")
     (catch ExceptionInfo e
       (System/exit (handle-cause e)))
     (catch Exception e
-      (fatal (format "rammler died with an unexpected error: %s" (.getMessage e)))
+      (fatalf "rammler died with an unexpected error: %s" (.getMessage e))
       (trace (timbre/stacktrace e))
       (System/exit 255))))
