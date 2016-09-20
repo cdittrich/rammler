@@ -110,7 +110,7 @@
                     (handle-method-frame {:stream (s/splice s s'') :info info :resolver resolver :agent a} frame)
                     (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
                                                           :got (select-keys frame [type class method])})))))))))
-      (d/catch (fn [e] (error "Exception" e) (s/close! s))))))
+      (d/catch (fn [e] (error "Exception" e) (trace (timbre/stacktrace e)) (s/close! s))))))
 
 (defonce server (atom nil))
 (defonce ssl-server (atom nil))

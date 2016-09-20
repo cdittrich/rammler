@@ -94,8 +94,9 @@ There is NO WARRANTY, to the extent permitted by law.")
                                 :min-level nil)}})
   (Thread/setDefaultUncaughtExceptionHandler
     (reify Thread$UncaughtExceptionHandler
-      (uncaughtException [_ thread ex]
-        (errorf "Uncaught exception on %s: %s" (.getName thread) ex))))
+      (uncaughtException [_ thread e]
+        (errorf "Uncaught exception on %s: %s" (.getName thread) e)
+        (trace (timbre/stacktrace e)))))
   (try
     (if (= (run args) :exit)
       (System/exit 0)
