@@ -87,7 +87,7 @@ There is NO WARRANTY, to the extent permitted by law.")
 (defn -main
   "Set defaults and run rammler"
   [& args]
-  (timbre/set-level! :debug)
+  (timbre/set-level! :trace)
   (timbre/merge-config!
    {:appenders {:println (assoc (timbre/println-appender {:stream :std-out})
                                 :output-fn (comp force :msg_)
