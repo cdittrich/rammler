@@ -307,8 +307,7 @@
   [frame]
   (try (postdecode (decode-frame (validate-frame frame)))
        (catch Exception e
-         (println "Error decoding frame: " e)
-         {})))
+         (throw (ex-info "Error decoding frame" {:cause :frame-decoding-error} e)))))
 
 (defn decode-amqp-stream
   "Return new gloss stream from `src` that emits decoded frames"
