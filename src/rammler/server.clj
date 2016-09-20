@@ -12,6 +12,14 @@
 
 (taoensso.timbre/refer-timbre)
 
+(defn decoder
+  "Provide an AMQP decoding stream from `src` that pushes messages through agent `a`"
+  [src a]
+  (let [dst (s/stream)]
+    (s/connect-via src (fn [frame] (send a (fn [_] (s/put! dst frame))) d/true-deferred-) dst)
+    (s/on-drained src #(s/close! dst))
+    (amqp/decode-amqp-stream dst)))
+
 (defn send-start [stream capabilities]
   (s/put! stream (amqp/encode-frame {:type :method
                                      :channel 0
@@ -34,12 +42,12 @@
 (defmethod handle-method-frame :default [context frame]
   (error "Unhandled method frame" frame))
 
-(defmethod handle-method-frame [:connection :start-ok] [{:keys [stream info resolver]} {:keys [payload] :as frame}]
+(defmethod handle-method-frame [:connection :start-ok] [{:keys [stream info resolver agent]} {:keys [payload] :as frame}]
   (let [{:keys [client-properties] {:keys [login]} :response} payload
         {:keys [remote-addr server-port server-name]} info]
-    (println (format "New Connection from %s (%s %s) -> %s@%s:%d"
-               remote-addr (client-properties "product") (client-properties "version")
-               login server-name server-port))
+    (infof "New Connection from %s (%s %s) -> %s@%s:%d"
+      remote-addr (client-properties "product") (client-properties "version")
+      login server-name server-port)
     (debug "Client" frame)
     (if-let [server (resolver login)]
       (d/let-flow [conn (tcp/client server)]
@@ -47,11 +55,11 @@
          (fn [_] (s/take! conn))
          (partial decode amqp/amqp-frame) amqp/decode-amqp-frame
          (fn [frame]
-           (println "Connected to RabbitMQ")
+           (debugf "Connected to RabbitMQ %s:%d" (server :host) (server :port))
            (debug "Server" (prn-str frame))
            (s/connect stream conn)
            (s/connect conn stream)
-           (s/consume #(debug "Server" (pr-str %)) (amqp/decode-amqp-stream conn)))))
+           (s/consume #(debug "Server" (pr-str %)) (decoder conn agent)))))
       (throw (ex-info "Unresolvable username" {:user login})))))
 
 (defn handler
@@ -91,13 +99,15 @@
           (debug "Got header" header)
           (if (= header ["AMQP" 0 0 9 1])
             (let [s' (amqp/decode-amqp-stream s)
-                  s'' (s/stream)]
+                  s'' (s/stream)
+                  a (agent nil :error-mode :continue)]
               (s/connect s s'')
               (d/chain (send-start s capabilities) (fn [_] (s/take! s'))
                 (fn [{:keys [type class method] :as frame}]
-                  (s/consume #(debug "Client" (pr-str %)) s')
+                  (s/close! s')
+                  (s/consume #(debug "Client" (pr-str %)) (decoder s a))
                   (if (= [type class method] [:method :connection :start-ok])
-                    (handle-method-frame {:stream (s/splice s s'') :info info :resolver resolver} frame)
+                    (handle-method-frame {:stream (s/splice s s'') :info info :resolver resolver :agent a} frame)
                     (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
                                                           :got (select-keys frame [type class method])})))))))))
       (d/catch (fn [e] (error "Exception" e) (s/close! s))))))
