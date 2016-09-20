@@ -20,22 +20,24 @@
     (s/on-drained src #(s/close! dst))
     (amqp/decode-amqp-stream dst)))
 
-(defn send-start [stream capabilities]
-  (s/put! stream (amqp/encode-frame {:type :method
-                                     :channel 0
-                                     :class :connection
-                                     :method :start
-                                     :payload {:version-major 0
-                                               :version-minor 9
-                                               :server-properties {"capabilities" (zipmap (map ->snake_case_string capabilities) (repeat true))
-                                                                   "cluster_name" "rabbit@broker1.adorno.in.lshift.de"
-                                                                   "copyright" conf/copyright
-                                                                   "information" conf/license
-                                                                   "platform" conf/platform
-                                                                   "product" conf/product
-                                                                   "version" conf/version}
-                                               :mechanisms "AMQPLAIN PLAIN"
-                                               :locales "en_US"}})))
+(defn send-start [stream capabilities name]
+  (let [frame {:type :method
+               :channel 0
+               :class :connection
+               :method :start
+               :payload {:version-major 0
+                         :version-minor 9
+                         :server-properties {"capabilities" (zipmap (map ->snake_case_string capabilities) (repeat true))
+                                             "cluster_name" name
+                                             "copyright" conf/copyright
+                                             "information" conf/license
+                                             "platform" conf/platform
+                                             "product" conf/product
+                                             "version" conf/version}
+                         :mechanisms "AMQPLAIN PLAIN"
+                         :locales "en_US"}}]
+    (debug "rammler" frame)
+    (s/put! stream (amqp/encode-frame frame))))
 
 (defmulti handle-method-frame (fn [context {:keys [class method]}] [class method]))
 
@@ -91,7 +93,7 @@
   There is no hand-shaking for errors on connections that are not fully open. Following successful protocol
   header negotiation, which is defined in detail later, and prior to sending or receiving Open or Open-Ok, a
   peer that detects an error MUST close the socket without sending any further data."
-  [resolver capabilities]
+  [resolver capabilities name]
   (fn [s info]
     (-> (s/take! s)
       (d/chain (partial decode amqp/amqp-header)
@@ -102,7 +104,7 @@
                   s'' (s/stream)
                   a (agent nil :error-mode :continue)]
               (s/connect s s'')
-              (d/chain (send-start s capabilities) (fn [_] (s/take! s'))
+              (d/chain (send-start s capabilities name) (fn [_] (s/take! s'))
                 (fn [{:keys [type class method] :as frame}]
                   (s/close! s')
                   (s/consume #(debug "Client" (pr-str %)) (decoder s a))
@@ -116,10 +118,10 @@
 (defonce ssl-server (atom nil))
 
 (defn start-server
-  ([resolver {:keys [port ssl-port interface ssl-interface capabilities]}]
+  ([resolver {:keys [port ssl-port interface ssl-interface capabilities cluster-name] :or {cluster-name conf/hostname}}]
    (doseq [s [@server @ssl-server]]
      (try (when s (.close s)) (catch Exception _)))
-   (let [f (handler resolver capabilities)
+   (let [f (handler resolver capabilities cluster-name)
          listen? (and interface port)
          listen-ssl? (and ssl-interface ssl-port)]
      (when listen?

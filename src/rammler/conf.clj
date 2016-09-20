@@ -25,6 +25,7 @@
 (def product "rammler")
 (def version (get-version "lshift-de" "rammler"))
 (def default-config "/etc/rammler.edn")
+(def hostname (.getHostName (java.net.InetAddress/getLocalHost)))
 
 ;; spec
 
@@ -46,7 +47,7 @@
 
 (s/def ::base-config
   (s/keys
-    :opt-un [::log-level ::log-directory ::port ::ssl-port ::interface ::ssl-interface]
+    :opt-un [::log-level ::log-directory ::port ::ssl-port ::interface ::ssl-interface ::cluster-name]
     :req-un [::strategy ::capabilities]))
 
 (defmulti strategy-type :strategy)
@@ -57,6 +58,7 @@
 
 (s/def ::config (s/multi-spec strategy-type :strategy))
 
+(s/def ::cluster-name string?)
 (s/def ::log-level timbre/-levels-set)
 (s/def ::log-directory (s/conformer writable-directory?))
 (s/def ::port integer?)

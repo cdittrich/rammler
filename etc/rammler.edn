@@ -1,4 +1,5 @@
-{:log-level :info
+{#_:cluster-name #_"rammler"
+ :log-level :info
  :log-directory "/var/log/rammler"
  :port 5672
  :ssl-port 5671
