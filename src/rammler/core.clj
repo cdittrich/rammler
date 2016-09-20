@@ -92,6 +92,10 @@ There is NO WARRANTY, to the extent permitted by law.")
    {:appenders {:println (assoc (timbre/println-appender {:stream :std-out})
                                 :output-fn (comp force :msg_)
                                 :min-level nil)}})
+  (Thread/setDefaultUncaughtExceptionHandler
+    (reify Thread$UncaughtExceptionHandler
+      (uncaughtException [_ thread ex]
+        (errorf "Uncaught exception on %s: %s" (.getName thread) ex))))
   (try
     (if (= (run args) :exit)
       (System/exit 0)
