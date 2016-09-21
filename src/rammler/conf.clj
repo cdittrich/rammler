@@ -100,11 +100,6 @@
 
 (s/def ::capabilities (s/coll-of keyword?))
 
-(s/def ::config
-  (s/keys
-    :opt-un [::log-level ::log-directory ::port ::ssl-port ::interface ::ssl-interface ::database ::static]
-    :req-un [::strategy ::capabilities]))
-
 ;; EDN reading
 
 (defn- pushback-reader [o]
