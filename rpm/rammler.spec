@@ -12,6 +12,7 @@ Source3:        sysconfig
 Source4:        README.md
 Source5:        COPYING.md
 Source6:        rammler.edn
+Source7:        CHANGELOG.md
 
 %{?systemd_requires}
 BuildRequires:  systemd
@@ -31,7 +32,7 @@ endpoint for clients.
 
 %prep
 %setup -T -c
-cp %{SOURCE4} %{SOURCE5} .
+cp %{SOURCE4} %{SOURCE5} %{SOURCE7} .
 
 
 %build
