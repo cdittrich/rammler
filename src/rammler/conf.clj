@@ -66,6 +66,8 @@
     :opt-un [::log-level ::log-directory ::port ::ssl-port ::interface ::ssl-interface ::cluster-name]
     :req-un [::strategy ::capabilities]))
 
+(s/def ::strategy keyword?)
+
 (defmulti strategy-type :strategy)
 (defmethod strategy-type :database [_]
   (s/merge ::base-config (s/keys :req-un [::database])))
@@ -118,7 +120,9 @@
 (defn load-config
   ([s]
    (let [config (read-config s)
-         config' (s/conform ::config config)]
+         ;; TODO Workaround, remove once not needed anymore
+         ;; s/merge loses transformations from custom conformers in 1.9.0-alpha12
+         config' (s/conform ::config (s/conform ::base-config config))]
      (if (= config' :clojure.spec/invalid)
        (throw (ex-info (s/explain-str ::config config) {:cause :configuration-error}))
        config')))
