@@ -1,6 +1,6 @@
 Name:           rammler
 Version:        0.1.0
-Release:        0.%{build_number}.pre%{?dist}
+Release:        0.%{build_number}.pre
 Summary:        RabbitMQ Proxy
 
 License:        AGPLv3+
