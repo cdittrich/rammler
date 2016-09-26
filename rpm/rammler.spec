@@ -51,7 +51,8 @@ mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig
 cp -p %{SOURCE6} $RPM_BUILD_ROOT/%{_sysconfdir}/
 cp -p %{SOURCE3} $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig/%{name}
 
-mkdir -p $RPM_BUILD_ROOT/%{_localstatedir}/log/%{name}
+mkdir -p $RPM_BUILD_ROOT/%{_localstatedir}/log/%{name} \
+         $RPM_BUILD_ROOT/%{_sharedstatedir}/%{name}
 
 
 %pre
@@ -74,7 +75,7 @@ exit 0
 %files
 %license COPYING.md
 %doc README.md CHANGELOG.md
-%dir %{_sharedstatedir}/%{name}
+%attr(-, rammler, rammler) %dir %{_sharedstatedir}/%{name}
 %attr(-, rammler, rammler) %dir %{_localstatedir}/log/%{name}
 %{_javadir}/%{name}.jar
 %{_unitdir}/%{name}.service
