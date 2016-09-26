@@ -6,7 +6,7 @@ After=network.target
 User=rammler
 Group=rammler
 WorkingDirectory=/var/lib/rammler
-ExecStart=/bin/java -jar /usr/share/java/rammler.jar
+ExecStart=/bin/rammler
 EnvironmentFile=-/etc/sysconfig/rammler
 Restart=on-failure
 

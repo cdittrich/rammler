@@ -13,6 +13,7 @@ Source4:        README.md
 Source5:        COPYING.md
 Source6:        rammler.edn
 Source7:        CHANGELOG.md
+Source8:        rammler
 
 %{?systemd_requires}
 BuildRequires:  systemd
@@ -51,6 +52,9 @@ mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig
 cp -p %{SOURCE6} $RPM_BUILD_ROOT/%{_sysconfdir}/
 cp -p %{SOURCE3} $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig/%{name}
 
+mkdir -p $RPM_BUILD_ROOT/${_bindir}
+install -m 755 %{SOURCE8} $RPM_BUILD_ROOT/${_bindir}/
+
 mkdir -p $RPM_BUILD_ROOT/%{_localstatedir}/log/%{name} \
          $RPM_BUILD_ROOT/%{_sharedstatedir}/%{name}
 
@@ -77,6 +81,7 @@ exit 0
 %doc README.md CHANGELOG.md
 %attr(-, rammler, rammler) %dir %{_sharedstatedir}/%{name}
 %attr(-, rammler, rammler) %dir %{_localstatedir}/log/%{name}
+%{_bindir}/%{name}
 %{_javadir}/%{name}.jar
 %{_unitdir}/%{name}.service
 %{_unitdir}/%{name}.socket
