@@ -202,7 +202,9 @@
   class -> keyword -> method-id"
   (into {} (for [[class methods] amqp-methods] [class (zipmap (vals methods) (keys methods))])))
 
-(defn- pack-bitmasks [arguments]
+(defn- pack-bitmasks
+  "Pack together arguments of type `bit`"
+  [arguments]
   (mapcat (fn [coll] (let [[{:keys [type]}] coll]
                        (if (= type "bit") 
                          [{:name "bitmask" :domain "octet" :flags (map (comp keyword :name) coll) :default-value (map :default-value coll)}]
