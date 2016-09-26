@@ -18,6 +18,7 @@ Source7:        CHANGELOG.md
 BuildRequires:  systemd
 Requires:       java-headless >= 1:1.8.0
 Requires:       javapackages-tools
+Requires(pre):  shadow-utils
 
 BuildArch:      noarch
 
@@ -49,7 +50,16 @@ cp -p %{SOURCE1} %{SOURCE2} $RPM_BUILD_ROOT/%{_unitdir}/
 mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig
 cp -p %{SOURCE6} $RPM_BUILD_ROOT/%{_sysconfdir}/
 cp -p %{SOURCE3} $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig/%{name}
- 
+
+mkdir -p $RPM_BUILD_ROOT/%{_localstatedir}/log/%{name}
+
+
+%pre
+getent group %{name} >/dev/null || groupadd -r %{name}
+getent passwd %{name} >/dev/null || \
+    useradd -r -g %{name} -d %{_sharedstatedir}/%{name} -s /sbin/nologin \
+            -c "rammler system user account" %{name}
+exit 0
 
 %post
 %systemd_post %{name}.service
@@ -64,6 +74,8 @@ cp -p %{SOURCE3} $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig/%{name}
 %files
 %license COPYING.md
 %doc README.md CHANGELOG.md
+%dir %{_sharedstatedir}/%{name}
+%attr(-, rammler, rammler) %dir %{_localstatedir}/log/%{name}
 %{_javadir}/%{name}.jar
 %{_unitdir}/%{name}.service
 %{_unitdir}/%{name}.socket
