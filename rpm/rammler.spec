@@ -52,8 +52,8 @@ mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig
 cp -p %{SOURCE6} $RPM_BUILD_ROOT/%{_sysconfdir}/
 cp -p %{SOURCE3} $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig/%{name}
 
-mkdir -p $RPM_BUILD_ROOT/${_bindir}
-install -m 755 %{SOURCE8} $RPM_BUILD_ROOT/${_bindir}/
+mkdir -p $RPM_BUILD_ROOT/%{_bindir}
+install -m 755 %{SOURCE8} $RPM_BUILD_ROOT/%{_bindir}/
 
 mkdir -p $RPM_BUILD_ROOT/%{_localstatedir}/log/%{name} \
          $RPM_BUILD_ROOT/%{_sharedstatedir}/%{name}
