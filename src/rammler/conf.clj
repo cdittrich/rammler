@@ -123,7 +123,7 @@
        config')))
   ([] (load-config default-config)))
 
-(defn process-config! [{:keys [log-level log-directory]}]
+(defn process-config! [{:keys [conf/log-level conf/log-directory]}]
   (if log-level
     (timbre/merge-config!
       {:appenders {:println (assoc (timbre/println-appender {:stream :std-out})
