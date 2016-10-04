@@ -115,7 +115,7 @@
                              pr (pushback-reader r)]
                    (try (edn/read pr)
                         (catch Exception e
-                          (throw (ex-info file {:cause :configuration-parse-error} e)))))))
+                          (throw (ex-info (str file) {:cause :configuration-parse-error} e)))))))
 
 (defn load-config
   ([s]
