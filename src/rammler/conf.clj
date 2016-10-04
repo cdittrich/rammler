@@ -63,44 +63,41 @@
 
 (s/def ::base-config
   (s/keys
-    :opt-un [::log-level ::log-directory ::port ::ssl-port ::interface ::ssl-interface ::cluster-name]
-    :req-un [::strategy ::capabilities]))
+    :opt [:conf/log-level :conf/log-directory :conf/port :conf/ssl-port :conf/interface :conf/ssl-interface :conf/cluster-name]
+    :req [:conf/strategy :conf/capabilities]))
 
-(s/def ::strategy keyword?)
+(s/def :conf/strategy keyword?)
 
-(defmulti strategy-type :strategy)
+(defmulti strategy-type :conf/strategy)
 (defmethod strategy-type :database [_]
-  (s/merge ::base-config (s/keys :req-un [::database])))
+  (s/merge ::base-config (s/keys :req [:conf/database])))
 (defmethod strategy-type :static [_]
-  (s/merge ::base-config (s/keys :req-un [::static])))
+  (s/merge ::base-config (s/keys :req [:conf/static])))
 
-(s/def ::config (s/multi-spec strategy-type :strategy))
+(s/def ::config (s/multi-spec strategy-type :conf/strategy))
 
-(s/def ::cluster-name string?)
-(s/def ::log-level timbre/-levels-set)
-(s/def ::log-directory (s/conformer writable-directory?))
-(s/def ::port integer?)
-(s/def ::ssl-port integer?)
-(s/def ::interface (s/conformer valid-interface?))
-(s/def ::ssl-interface (s/conformer valid-interface?))
+(s/def :conf/cluster-name string?)
+(s/def :conf/log-level timbre/-levels-set)
+(s/def :conf/log-directory (s/conformer writable-directory?))
+(s/def :conf/port integer?)
+(s/def :conf/ssl-port integer?)
+(s/def :conf/interface (s/conformer valid-interface?))
+(s/def :conf/ssl-interface (s/conformer valid-interface?))
 
-(s/def ::database
-  (s/keys :req-un [:rammler.conf.database/spec :rammler.conf.database/query]))
-(s/def ::static (s/keys :req-un [:rammler.conf.static/host :rammler.conf.static/port]))
+(s/def :conf/database (s/keys :req [:database/spec :database/query]))
+(s/def :conf/static (s/keys :req [:static/host :static/port]))
 
-(s/def :rammler.conf.database/spec
-  (s/keys :req-un [:rammler.conf.database.spec/subprotocol :rammler.conf.database.spec/subname
-                   :rammler.conf.database.spec/user :rammler.conf.database.spec/password]))
-(s/def :rammler.conf.database/query string?)
+(s/def :database/spec (s/keys :req [:database/subprotocol :database/subname :database/user :database/password]))
+(s/def :database/query string?)
+(s/def :database/subprotocol string?)
+(s/def :database/subname string?)
+(s/def :database/user string?)
+(s/def :database/password string?)
 
-(s/def :rammler.conf.database.spec/subprotocol string?)
-(s/def :rammler.conf.database.spec/subname string?)
-(s/def :rammler.conf.database.spec/user string?)
-(s/def :rammler.conf.database.spec/password string?)
-(s/def :rammler.conf.static/host string?)
-(s/def :rammler.conf.static/port integer?)
+(s/def :static/host string?)
+(s/def :static/port integer?)
 
-(s/def ::capabilities (s/coll-of keyword?))
+(s/def :conf/capabilities (s/coll-of keyword?))
 
 ;; EDN reading
 
@@ -120,9 +117,7 @@
 (defn load-config
   ([s]
    (let [config (read-config s)
-         ;; TODO Workaround, remove once not needed anymore
-         ;; s/merge loses transformations from custom conformers in 1.9.0-alpha12
-         config' (s/conform ::config (s/conform ::base-config config))]
+         config' (s/conform ::config config)]
      (if (= config' :clojure.spec/invalid)
        (throw (ex-info (s/explain-str ::config config) {:cause :configuration-error}))
        config')))

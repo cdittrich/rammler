@@ -1,26 +1,26 @@
-{#_:cluster-name #_"rammler"
- :log-level :info
- :log-directory "/var/log/rammler"
- :port 5672
- :ssl-port 5671
- :interface "0.0.0.0"
- :ssl-interface "0.0.0.0"
- :strategy :static
- :database {:spec {:subprotocol "postgresql"
-                   :subname "//localhost:5432/database"
-                   :user "user"
-                   :password "password"}
-            #_:spec #_"postgresql://localhost:5432/database?user=user&password=password"
-            :query "select * from host where user = '$user'"}
- :static {:host "rabbitmq"
-          :port 5672}
- :capabilities [:publisher-confirms
-                :per-consumer-qos
-                :exchange-exchange-bindings
-                :authentication-failure-close
-                :connection.blocked
-                :consumer-cancel-notify
-                :basic.nack
-                :direct-reply-to
-                :consumer-priorities]}
+#:conf{#_:cluster-name #_"rammler"
+       :log-level :info
+       :log-directory "/var/log/rammler"
+       :port 5672
+       :ssl-port 5671
+       :interface "0.0.0.0"
+       :ssl-interface "0.0.0.0"
+       :strategy :static
+       :database {:database/spec #:database{:subprotocol "postgresql"
+                                            :subname "//localhost:5432/database"
+                                            :user "user"
+                                            :password "password"}
+                  #_:database/spec #_"postgresql://localhost:5432/database?user=user&password=password"
+                  :database/query "select * from host where user = '$user'"}
+       :static {:static/host "rabbitmq"
+                :static/port 5672}
+       :capabilities [:publisher-confirms
+                           :per-consumer-qos
+                           :exchange-exchange-bindings
+                           :authentication-failure-close
+                           :connection.blocked
+                           :consumer-cancel-notify
+                           :basic.nack
+                           :direct-reply-to
+                           :consumer-priorities]}
 
