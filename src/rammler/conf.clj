@@ -87,7 +87,7 @@
 (s/def :conf/database (s/keys :req [:database/spec :database/query]))
 (s/def :conf/static (s/keys :req [:static/host :static/port]))
 
-(s/def :database/spec (s/keys :req [:database/subprotocol :database/subname :database/user :database/password]))
+(s/def :database/spec (s/keys :req-un [:database/subprotocol :database/subname :database/user :database/password]))
 (s/def :database/query string?)
 (s/def :database/subprotocol string?)
 (s/def :database/subname string?)

@@ -6,10 +6,10 @@
        :interface "0.0.0.0"
        :ssl-interface "0.0.0.0"
        :strategy :static
-       :database {:database/spec #:database{:subprotocol "postgresql"
-                                            :subname "//localhost:5432/database"
-                                            :user "user"
-                                            :password "password"}
+       :database {:database/spec {:subprotocol "postgresql"
+                                  :subname "//localhost:5432/database"
+                                  :user "user"
+                                  :password "password"}
                   #_:database/spec #_"postgresql://localhost:5432/database?user=user&password=password"
                   :database/query "select * from host where user = '$user'"}
        :static {:static/host "rabbitmq"
