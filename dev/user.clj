@@ -33,7 +33,7 @@
 
 (defn start []
   (jdbc/with-db-connection [conn db]
-    (server/start-server (constantly {:host "localhost" :port 5673 :ssl false}))))
+    (server/start-server (constantly {:conf/host "localhost" :conf/port 5673 :conf/ssl false}))))
 
 (defn reset-db []
   (jdbc/db-do-commands db

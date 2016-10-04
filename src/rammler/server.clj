@@ -134,7 +134,8 @@
 (defonce ssl-server (atom nil))
 
 (defn start-server
-  ([resolver {:keys [port ssl-port interface ssl-interface capabilities cluster-name] :or {cluster-name conf/hostname}}]
+  ([resolver {:keys [conf/port conf/ssl-port conf/interface conf/ssl-interface conf/capabilities conf/cluster-name]
+              :or {cluster-name conf/hostname}}]
    (doseq [s [@server @ssl-server]]
      (try (when s (.close s)) (catch Exception _)))
    (let [f (handler resolver capabilities cluster-name)
