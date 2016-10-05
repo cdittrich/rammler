@@ -23,7 +23,7 @@
   :url "https://github.com/lshift-de/rammler"
   :license {:name "AGPLv3+"
             :url "http://www.gnu.org/licenses/agpl.html"}
-  :dependencies [[org.clojure/clojure "1.9.0-alpha12"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha13"]
                  [aleph "0.4.1"]
                  [gloss "0.2.6"]
                  [trptcolin/versioneer "0.2.0"]
