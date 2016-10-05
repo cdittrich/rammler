@@ -60,7 +60,7 @@
 (defmethod handle-method-frame :default [context frame]
   (error "Unhandled method frame" frame))
 
-(defmethod handle-method-frame [:connection :start-ok] [{:keys [stream info resolver agent]} {:keys [payload] :as frame}]
+(defmethod handle-method-frame [:connection :start-ok] [{:keys [stream info resolver agent trace?]} {:keys [payload] :as frame}]
   (let [{:keys [client-properties] {:keys [login]} :response} payload
         {:keys [remote-addr server-port server-name]} info]
     (infof "New Connection from %s (%s %s) -> %s@%s:%d"
@@ -77,7 +77,7 @@
            (debug "Server" (prn-str frame))
            (s/connect stream conn)
            (s/connect conn stream)
-           (s/consume #(debug "Server" (pr-str %)) (decoder conn agent)))))
+           (when trace? (s/consume #(debug "Server" (pr-str %)) (decoder conn agent))))))
       (throw (ex-info "Unresolvable username" {:user login})))))
 
 (defn handler
@@ -109,7 +109,7 @@
   There is no hand-shaking for errors on connections that are not fully open. Following successful protocol
   header negotiation, which is defined in detail later, and prior to sending or receiving Open or Open-Ok, a
   peer that detects an error MUST close the socket without sending any further data."
-  [resolver capabilities name]
+  [resolver capabilities name trace?]
   (fn [s info]
     (-> (s/take! s)
       (d/chain (partial decode amqp/amqp-header)
@@ -123,9 +123,9 @@
               (d/chain (send-start s capabilities name) (fn [_] (s/take! s'))
                 (fn [{:keys [type class method] :as frame}]
                   (s/close! s')
-                  (s/consume #(debug "Client" (pr-str %)) (decoder s a))
+                  (when trace? (s/consume #(debug "Client" (pr-str %)) (decoder s a)))
                   (if (= [type class method] [:method :connection :start-ok])
-                    (handle-method-frame {:stream (s/splice s s'') :info info :resolver resolver :agent a} frame)
+                    (handle-method-frame {:stream (s/splice s s'') :info info :resolver resolver :agent a :trace? trace?} frame)
                     (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
                                                           :got (select-keys frame [type class method])})))))))))
       (d/catch (fn [e] (error "Exception" e) (trace (timbre/stacktrace e)) (s/close! s))))))
@@ -134,11 +134,11 @@
 (defonce ssl-server (atom nil))
 
 (defn start-server
-  ([resolver {:keys [conf/port conf/ssl-port conf/interface conf/ssl-interface conf/capabilities conf/cluster-name]
+  ([resolver {:keys [conf/port conf/ssl-port conf/interface conf/ssl-interface conf/capabilities conf/cluster-name conf/trace?]
               :or {cluster-name conf/hostname}}]
    (doseq [s [@server @ssl-server]]
      (try (when s (.close s)) (catch Exception _)))
-   (let [f (handler resolver capabilities cluster-name)
+   (let [f (handler resolver capabilities cluster-name trace?)
          listen? (and interface port)
          listen-ssl? (and ssl-interface ssl-port)]
      (when listen?
