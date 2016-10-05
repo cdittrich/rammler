@@ -15,12 +15,12 @@
        :static {:static/host "rabbitmq"
                 :static/port 5672}
        :capabilities [:publisher-confirms
-                           :per-consumer-qos
-                           :exchange-exchange-bindings
-                           :authentication-failure-close
-                           :connection.blocked
-                           :consumer-cancel-notify
-                           :basic.nack
-                           :direct-reply-to
-                           :consumer-priorities]}
+                      :per-consumer-qos
+                      :exchange-exchange-bindings
+                      :authentication-failure-close
+                      :connection.blocked
+                      :consumer-cancel-notify
+                      :basic.nack
+                      :direct-reply-to
+                      :consumer-priorities]}
 
