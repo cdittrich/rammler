@@ -32,8 +32,7 @@
 (def query "select host, port, ssl from hosts join users on hosts.id = users.hostid where users.name = '$user'")
 
 (defn start []
-  (jdbc/with-db-connection [conn db]
-    (server/start-server (constantly {:conf/host "localhost" :conf/port 5673 :conf/ssl false}))))
+  (server/start-server (constantly {:host "localhost" :port 5673 :ssl false})))
 
 (defn reset-db []
   (jdbc/db-do-commands db

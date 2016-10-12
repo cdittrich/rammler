@@ -149,4 +149,4 @@
        (throw (ex-info "Configured to not listen on any interfaces" {:cause :configuration-error})))
      (filter identity [(when listen? [interface port])
                        (when listen-ssl? [ssl-interface ssl-port])])))
-  ([resolver] (start-server resolver {:port 5672 :ssl-port 5671 :interface "0.0.0.0" :ssl-interface "0.0.0.0" :capabilities conf/default-server-capabilities})))
+  ([resolver] (start-server resolver #:conf{:port 5672 :ssl-port 5671 :interface "0.0.0.0" :ssl-interface "0.0.0.0" :capabilities conf/default-server-capabilities})))
