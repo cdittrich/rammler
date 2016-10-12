@@ -52,7 +52,6 @@
                                              "version" conf/version}
                          :mechanisms "AMQPLAIN PLAIN"
                          :locales "en_US"}}]
-    (debug "rammler" frame)
     (s/put! stream (amqp/encode-frame frame))))
 
 (defmulti handle-method-frame (fn [context {:keys [class method]}] [class method]))
