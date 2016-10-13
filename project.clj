@@ -31,7 +31,8 @@
                  [guns.cli/optparse "1.1.2"]
                  [com.taoensso/timbre "4.7.4"]
                  [cheshire "5.6.3"]
-                 [org.clojure/java.jdbc "0.6.2-alpha3"]]
+                 [org.clojure/java.jdbc "0.6.2-alpha3"]
+                 [clojurewerkz/elastisch "2.2.2"]]
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all
                        :main rammler.core}

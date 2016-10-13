@@ -28,6 +28,8 @@
 
 (taoensso.timbre/refer-timbre)
 
+(def stats (agent {} :error-mode :continue))
+
 (defn decoder
   "Provide an AMQP decoding stream from `src` that pushes messages through agent `a`"
   [src a]
@@ -74,9 +76,12 @@
          (fn [frame]
            (debugf "Connected to RabbitMQ %s:%d" (server :host) (server :port))
            (debug "Server" (prn-str frame))
+           (send stats update login (partial merge {:read 0 :write 0}))
            (s/connect stream conn)
            (s/connect conn stream)
-           (when trace? (s/consume #(debug "Server" (pr-str %)) (decoder conn agent))))))
+           (when trace? (s/consume #(debug "Server" (pr-str %)) (decoder conn agent)))
+           (s/consume #(send stats update-in [login :write] (partial + (count %))) stream)
+           (s/consume #(send stats update-in [login :read] (partial + (count %))) conn))))
       (throw (ex-info "Unresolvable username" {:user login})))))
 
 (defn handler
