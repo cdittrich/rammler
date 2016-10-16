@@ -4,6 +4,7 @@
             [rammler.server :as server]
             [rammler.amqp :as amqp]
             [rammler.util :as util]
+            [rammler.stats :as stats]
 
             [langohr.core      :as rmq]
             [langohr.channel   :as lch]
@@ -25,6 +26,8 @@
                    :output-fn (fn [{:keys [level msg_]}]
                                 (format "%s> %s" (name level) (force msg_))))}})
 
+(timbre/set-level! :trace)
+
 (def db {:dbtype "derby"
          :dbname "rammler"
          :create true})
@@ -32,7 +35,7 @@
 (def query "select host, port, ssl from hosts join users on hosts.id = users.hostid where users.name = '$user'")
 
 (defn start []
-  (server/start-server (constantly {:host "localhost" :port 5673 :ssl false})))
+  (server/start-server (constantly {:host "localhost" :port 5673 :ssl false}) {:conf/stats? true :conf/trace? true}))
 
 (defn reset-db []
   (jdbc/db-do-commands db
@@ -65,3 +68,15 @@
     (server/start-server (fn [user]
                            (first
                              (jdbc/query db (str/replace query "$user" user)))))))
+
+(comment
+  (do (def conn (rmq/connect))
+      (def ch (lch/open conn))
+      (le/declare ch "out" "fanout" {:auto-delete true})
+      (lq/declare ch "test-1" {:auto-delete true})
+      (lq/declare ch "test-2" {:auto-delete true})
+      (lq/bind ch "test-1" "out")
+      (lq/bind ch "test-2" "out")
+      (lb/publish ch "out" "" "Hello!" {:content-type "text/plain"})
+      (lc/subscribe ch "test-1" (fn [& _]))
+      (lc/subscribe ch "test-2" (fn [& _]))))

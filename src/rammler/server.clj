@@ -18,6 +18,7 @@
   (:require [rammler.amqp :as amqp]
             [rammler.util :as util]
             [rammler.conf :as conf]
+            [rammler.stats :as stats]
             [aleph.tcp :as tcp]
             [aleph.netty :as netty]
             [gloss.io :refer [decode-stream decode encode]]
@@ -28,17 +29,20 @@
 
 (taoensso.timbre/refer-timbre)
 
-(def stats (agent {} :error-mode :continue))
+(defonce server (atom nil))
+(defonce ssl-server (atom nil))
 
 (defn decoder
-  "Provide an AMQP decoding stream from `src` that pushes messages through agent `a`"
-  [src a]
+  "Provide a decoding stream from `src` using `f` that pushes messages through agent `a`"
+  [src f a]
   (let [dst (s/stream)]
     (s/connect-via src (fn [frame] (send a (fn [_] (s/put! dst frame))) d/true-deferred-) dst)
     (s/on-drained src #(s/close! dst))
-    (amqp/decode-amqp-stream dst)))
+    (f dst)))
 
-(defn send-start [stream capabilities name]
+(defn send-start
+  "Send fully encoded connection.start frame through `stream`"
+  [stream capabilities name]
   (let [frame {:type :method
                :channel 0
                :class :connection
@@ -56,12 +60,9 @@
                          :locales "en_US"}}]
     (s/put! stream (amqp/encode-frame frame))))
 
-(defmulti handle-method-frame (fn [context {:keys [class method]}] [class method]))
-
-(defmethod handle-method-frame :default [context frame]
-  (error "Unhandled method frame" frame))
-
-(defmethod handle-method-frame [:connection :start-ok] [{:keys [stream info resolver agent trace?]} {:keys [payload] :as frame}]
+(defn handle-connection-start-ok
+  "Once the client sent connection.start-ok, attempt to initiate the proxy connection"
+  [stream info resolver agent trace? stats? {:keys [payload] :as frame}]
   (let [{:keys [client-properties] {:keys [login]} :response} payload
         {:keys [remote-addr server-port server-name]} info]
     (infof "New Connection from %s (%s %s) -> %s@%s:%d"
@@ -76,12 +77,14 @@
          (fn [frame]
            (debugf "Connected to RabbitMQ %s:%d" (server :host) (server :port))
            (debug "Server" (prn-str frame))
-           (send stats update login (partial merge {:read 0 :write 0}))
+           (when stats? (stats/init-account! login))
            (s/connect stream conn)
            (s/connect conn stream)
-           (when trace? (s/consume #(debug "Server" (pr-str %)) (decoder conn agent)))
-           (s/consume #(send stats update-in [login :write] (partial + (count %))) stream)
-           (s/consume #(send stats update-in [login :read] (partial + (count %))) conn))))
+           (when trace? (s/consume #(debug "Server" (pr-str %)) (decoder conn amqp/decode-amqp-stream agent)))
+           (when stats?
+             (let [handler (stats/handler login remote-addr)]
+               (s/consume handler (decoder stream amqp/decode-amqp-stream-light agent))
+               (s/consume handler (decoder conn amqp/decode-amqp-stream-light agent)))))))
       (throw (ex-info "Unresolvable username" {:user login})))))
 
 (defn handler
@@ -113,7 +116,7 @@
   There is no hand-shaking for errors on connections that are not fully open. Following successful protocol
   header negotiation, which is defined in detail later, and prior to sending or receiving Open or Open-Ok, a
   peer that detects an error MUST close the socket without sending any further data."
-  [resolver capabilities name trace?]
+  [resolver capabilities name trace? stats?]
   (fn [s info]
     (-> (s/take! s)
       (d/chain (partial decode amqp/amqp-header)
@@ -127,30 +130,29 @@
               (d/chain (send-start s capabilities name) (fn [_] (s/take! s'))
                 (fn [{:keys [type class method] :as frame}]
                   (s/close! s')
-                  (when trace? (s/consume #(debug "Client" (pr-str %)) (decoder s a)))
+                  (when trace? (s/consume #(debug "Client" (pr-str %)) (decoder s amqp/decode-amqp-stream a)))
                   (if (= [type class method] [:method :connection :start-ok])
-                    (handle-method-frame {:stream (s/splice s s'') :info info :resolver resolver :agent a :trace? trace?} frame)
+                    (handle-connection-start-ok (s/splice s s'') info resolver a trace? stats? frame)
                     (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
                                                           :got (select-keys frame [type class method])})))))))))
       (d/catch (fn [e] (error "Exception" e) (trace (timbre/stacktrace e)) (s/close! s))))))
 
-(defonce server (atom nil))
-(defonce ssl-server (atom nil))
-
 (defn start-server
-  ([resolver {:keys [conf/port conf/ssl-port conf/interface conf/ssl-interface conf/capabilities conf/cluster-name conf/trace?]
-              :or {cluster-name conf/hostname}}]
-   (doseq [s [@server @ssl-server]]
-     (try (when s (.close s)) (catch Exception _)))
-   (let [f (handler resolver capabilities cluster-name trace?)
-         listen? (and interface port)
-         listen-ssl? (and ssl-interface ssl-port)]
-     (when listen?
-       (reset! server (tcp/start-server f {:socket-address (util/socket-address interface port)})))
-     (when listen-ssl?
-       (reset! ssl-server (tcp/start-server f {:socket-address (util/socket-address ssl-interface ssl-port) :ssl-context (netty/self-signed-ssl-context)})))
-     (when-not (or listen? listen-ssl?)
-       (throw (ex-info "Configured to not listen on any interfaces" {:cause :configuration-error})))
-     (filter identity [(when listen? [interface port])
-                       (when listen-ssl? [ssl-interface ssl-port])])))
-  ([resolver] (start-server resolver #:conf{:port 5672 :ssl-port 5671 :interface "0.0.0.0" :ssl-interface "0.0.0.0" :capabilities conf/default-server-capabilities})))
+  [resolver {:keys [conf/port conf/ssl-port conf/interface conf/ssl-interface conf/capabilities conf/cluster-name conf/trace? conf/stats?]
+             :or {port 5672 ssl-port 5671 interface "0.0.0.0" ssl-interface "0.0.0.0"
+                  capabilities conf/default-server-capabilities cluster-name conf/hostname}}]
+  (doseq [s [@server @ssl-server]]
+    (try (when s (.close s)) (catch Exception _)))
+  (let [f (handler resolver capabilities cluster-name trace? stats?)
+        listen? (and interface port)
+        listen-ssl? (and ssl-interface ssl-port)]
+    (when stats?
+      (stats/start-scheduler))
+    (when listen?
+      (reset! server (tcp/start-server f {:socket-address (util/socket-address interface port)})))
+    (when listen-ssl?
+      (reset! ssl-server (tcp/start-server f {:socket-address (util/socket-address ssl-interface ssl-port) :ssl-context (netty/self-signed-ssl-context)})))
+    (when-not (or listen? listen-ssl?)
+      (throw (ex-info "Configured to not listen on any interfaces" {:cause :configuration-error})))
+    (filter identity [(when listen? [interface port])
+                      (when listen-ssl? [ssl-interface ssl-port])])))

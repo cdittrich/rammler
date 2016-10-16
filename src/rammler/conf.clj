@@ -63,7 +63,7 @@
 
 (s/def ::base-config
   (s/keys
-    :opt [:conf/log-level :conf/log-directory :conf/port :conf/ssl-port :conf/interface :conf/ssl-interface :conf/cluster-name :conf/trace?]
+    :opt [:conf/log-level :conf/log-directory :conf/port :conf/ssl-port :conf/interface :conf/ssl-interface :conf/cluster-name :conf/trace? :conf/stats?]
     :req [:conf/strategy :conf/capabilities]))
 
 (s/def :conf/strategy keyword?)
@@ -84,6 +84,7 @@
 (s/def :conf/interface (s/conformer valid-interface?))
 (s/def :conf/ssl-interface (s/conformer valid-interface?))
 (s/def :conf/trace? boolean?)
+(s/def :conf/stats? boolean?)
 
 (s/def :conf/database (s/keys :req [:database/spec :database/query]))
 (s/def :conf/static (s/keys :req [:static/host :static/port]))

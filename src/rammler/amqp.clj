@@ -280,6 +280,39 @@
 
 (defmethod decode-frame :heartbeat [_] {:type :heartbeat})
 
+(defmulti decode-frame-light
+  "Partially decode the payload of a decoded AMQP frame
+
+  Dispatches on frame type."
+  (comp amqp-frame-types first))
+
+(defmethod decode-frame-light :default [[frame-type channel payload]]
+  (throw (ex-info "Unimplemented frame type" {:type (get amqp-frame-types frame-type frame-type)
+                                              :channel channel
+                                              :payload payload})))
+
+(defmethod decode-frame-light :method [[_ channel payload]]
+  (let [[class-id method-id payload] (decode [class-id method-id rest] (byte-array payload))
+        class (amqp-classes class-id)
+        method (get-in amqp-methods [class method-id])]
+    {:type :method
+     :channel channel
+     :class class
+     :method method
+     :payload payload}))
+
+(defmethod decode-frame-light :header [[frame-type channel payload]]
+  {:type :header
+   :channel channel
+   :payload payload})
+
+(defmethod decode-frame-light :body [[frame-type channel payload]]
+  {:type :body
+   :channel channel
+   :payload payload})
+
+(defmethod decode-frame-light :heartbeat [_] {:type :heartbeat})
+
 (defn validate-frame
   "Validate decoded AMQP frame
 
@@ -327,7 +360,19 @@
        (catch Exception e
          (throw (ex-info "Error decoding frame" {:cause :frame-decoding-error} e)))))
 
+(defn decode-amqp-frame-light
+  "Partially decode AMQP `frame`"
+  [frame]
+  (try (decode-frame-light (validate-frame frame))
+       (catch Exception e
+         (throw (ex-info "Error decoding frame" {:cause :frame-decoding-error} e)))))
+
 (defn decode-amqp-stream
   "Return new gloss stream from `src` that emits decoded frames"
   [src]
   (s/map decode-amqp-frame (decode-stream src amqp-frame)))
+
+(defn decode-amqp-stream-light
+  "Return new gloss stream from `src` that emits partially decoded frames"
+  [src]
+  (s/map decode-amqp-frame-light (decode-stream src amqp-frame)))

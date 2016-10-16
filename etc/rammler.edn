@@ -1,5 +1,6 @@
 #:conf{#_:cluster-name #_"rammler"
-       #_:trace? #_true
+       #_:trace? #_false
+       #_:stats? #_false
        :log-level :info
        :log-directory "/var/log/rammler"
        :port 5672
