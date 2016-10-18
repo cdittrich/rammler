@@ -12,7 +12,7 @@
                                   :user "user"
                                   :password "password"}
                   #_:database/spec #_"postgresql://localhost:5432/database?user=user&password=password"
-                  :database/query "select * from host where user = '$user'"}
+                  :database/query "select * from host where user = ?"}
        :static {:static/host "rabbitmq"
                 :static/port 5672}
        :capabilities [:publisher-confirms
