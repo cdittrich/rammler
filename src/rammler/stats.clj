@@ -16,7 +16,10 @@
   (dosync (alter stats assoc login {:publish [] :deliver []})))
 
 (defn purge-stats! []
-  (dosync (doseq [[login] @stats] (reset-account! login))))
+  (dosync
+    (let [s @stats]
+      (doseq [[login] s] (reset-account! login))
+      s)))
 
 (defn- timestamp [] (System/currentTimeMillis))
 
@@ -37,13 +40,9 @@
 
 (defn record-stats! []
   (info "Recording current stats")
-  (dosync
-    (doseq [[login data] @stats
-           [type events] data
-           [addr events] (group-by :addr events)
-           :let [events (sort-by :timestamp < events)]]
-      (es/register! login {:from (:timestamp (first events)) :to (:timestamp (last events)) :addr addr :type (name type) :count (count events)}))
-    (purge-stats!)))
+  (doseq [[login data] (purge-stats!)
+          [type events] data]
+    (es/bulk-register! login (map (partial merge {:type (name type)}) events))))
 
 (def stop-channel (chan))
 
@@ -52,11 +51,11 @@
   (let [chimes (chime-ch (rest (tp/periodic-seq (t/now) (t/minutes 5))))]
     (go-loop []
       (let [[msg ch] (alts! [chimes stop-channel])]
-        (when (= ch stop-channel)
-          (close! chimes))
-        (debug "Running schedule")
-        (record-stats!)
-        (recur)))))
+        (if (= ch stop-channel)
+          (close! chimes)
+          (do (debug "Running schedule")
+              (record-stats!)
+              (recur)))))))
 
 (defn stop-scheduler []
   (>!! stop-channel true))
