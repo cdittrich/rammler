@@ -16,7 +16,7 @@
 
 (ns rammler.server
   (:require [rammler.amqp :as amqp]
-            [rammler.util :as util]
+            [rammler.util :as util :refer [timestamp]]
             [rammler.conf :as conf]
             [rammler.stats :as stats]
             [aleph.tcp :as tcp]
@@ -25,7 +25,9 @@
             [manifold.deferred :as d]
             [manifold.stream :as s]
             [camel-snake-kebab.core :refer :all]
-            [camel-snake-kebab.extras :refer [transform-keys]]))
+            [camel-snake-kebab.extras :refer [transform-keys]])
+  (:import [manifold.stream BufferedStream]
+           [java.util.concurrent.atomic AtomicReference AtomicLong]))
 
 (taoensso.timbre/refer-timbre)
 
@@ -34,11 +36,78 @@
 
 (defn decoder
   "Provide a decoding stream from `src` using `f` that pushes messages through agent `a`"
-  [src f a]
-  (let [dst (s/stream)]
-    (s/connect-via src (fn [frame] (send a (fn [_] (s/put! dst frame))) d/true-deferred-) dst)
-    (s/on-drained src #(s/close! dst))
-    (f dst)))
+  ([src a] (decoder src identity a))
+  ([src f a]
+   (let [dst (s/stream)]
+     (s/connect-via src (fn [frame] (send a (fn [_] (s/put! dst frame))) d/true-deferred-) dst)
+     (s/on-drained src #(s/close! dst))
+     (f dst))))
+
+(defn timer
+  "manifold stream that emits `hertz` `:token`s per second.
+
+  Charges up to `burst` messages when not consumed."
+  ([hertz burst]
+   (s/buffer burst (s/periodically (int (* (/ 1 hertz) 1000)) (constantly :token))))
+  ([hertz] (timer hertz hertz)))
+
+(defn queued
+  "Return queued stream from `source`
+
+  Whenever a value can be taken from `timer`, emit a message."
+  [source timer]
+  (let [sink (s/stream)]
+    (s/connect-via source
+      (fn [msg] (d/chain (s/take! timer) (fn [_] (s/put! sink msg))))
+      sink)
+    sink))
+
+(comment
+  (let [i (atom 0)]
+    (time (dotimes [_ 10] (println @(s/take! (queued (s/periodically 100 #(swap! i inc)) (timer 4 1)))))))
+
+  (let [hertz 10]
+    (go-loop [events nil]
+      (let [[msg ch] (alts! [queue stop-channel])]
+        (if (= ch stop-channel)
+          (debug "Returning")
+          (let [t (timestamp)
+                events (take-while #(<= (- t 1000) %) events)]
+            (when (>= (count events) hertz)
+              (debug "Waiting" (- (nth events (dec hertz)) (- t 1000)) (seq events))
+              (<! (timeout (- (last events) (- t 1000)))))
+            (debug "Running" msg (count events))
+            (recur (cons (timestamp) events))))))))
+
+(defn shared-buffered-stream
+  "Shared counter version of `manifold.stream/buffered-stream`"
+  ([size-ref last-put buffer-size]
+    (shared-buffered-stream size-ref last-put (constantly 1) buffer-size))
+  ([size-ref last-put metric limit]
+    (shared-buffered-stream size-ref last-put metric limit identity))
+  ([^AtomicLong size-ref ^AtomicReference last-put metric limit description]
+    (let [buf (s/stream Integer/MAX_VALUE)
+          buf+ (fn [^long n]
+                 (locking last-put
+                   (let [buf' (.addAndGet size-ref n)
+                         buf  (unchecked-subtract buf' n)]
+                     (cond
+                       (and (<= buf' limit) (< limit buf))
+                       (-> last-put .get (d/success! true))
+
+                       (and (<= buf limit) (< limit buf'))
+                       (-> last-put (.getAndSet (d/deferred)) (d/success! true))))))]
+
+      (BufferedStream.
+        buf
+        limit
+        metric
+        description
+        size-ref
+        last-put
+        buf+
+        (atom nil)
+        (atom nil)))))
 
 (defn send-start
   "Send fully encoded connection.start frame through `stream`"
@@ -78,13 +147,21 @@
            (debugf "Connected to RabbitMQ %s:%d" (server :host) (server :port))
            (debug "Server" (prn-str frame))
            (when stats? (stats/init-account! login))
-           (s/connect stream conn)
-           (s/connect conn stream)
-           (when trace? (s/consume #(debug "Server" (pr-str %)) (decoder conn amqp/decode-amqp-stream agent)))
-           (when stats?
-             (let [handler (stats/handler login remote-addr)]
-               (s/consume handler (decoder stream amqp/decode-amqp-stream-light agent))
-               (s/consume handler (decoder conn amqp/decode-amqp-stream-light agent)))))))
+           (let [stream' (amqp/decode-amqp-stream-light stream)
+                 conn' (amqp/decode-amqp-stream-light conn)]
+             (let [buffer-size (AtomicLong. 0)
+                   last-put (AtomicReference. (d/success-deferred true))
+                   buffered (fn [source]
+                              (let [buffer (shared-buffered-stream buffer-size last-put 1)]
+                                (s/connect source buffer)
+                                (s/map second buffer)))]
+               (s/connect (buffered stream') conn)
+               (s/connect (buffered conn') stream))
+             (when trace? (s/consume #(debug "Server" (pr-str %)) (decoder conn amqp/decode-amqp-stream agent)))
+             (when stats?
+               (let [handler (comp (stats/handler login remote-addr) first)]
+                 (s/consume handler (decoder stream' agent))
+                 (s/consume handler (decoder conn' agent))))))))
       (throw (ex-info "Unresolvable username" {:user login})))))
 
 (defn handler

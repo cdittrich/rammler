@@ -32,3 +32,5 @@
 
 (defn socket-address [address port]
   (java.net.InetSocketAddress. (inet-address address) port))
+
+(defn timestamp [] (System/currentTimeMillis))

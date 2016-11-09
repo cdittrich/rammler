@@ -1,5 +1,6 @@
 (ns rammler.stats
   (:require [rammler.elastic :as es]
+            [rammler.util :refer [timestamp]]
             [clj-time.core :as t]
             [clj-time.periodic :as tp]
             [clojure.core.async :refer [go go-loop alts! close! <!! chan <! >!! >!]]
@@ -20,8 +21,6 @@
     (let [s @stats]
       (doseq [[login] s] (reset-account! login))
       s)))
-
-(defn- timestamp [] (System/currentTimeMillis))
 
 (defn register! [login q addr]
   (dosync (alter stats update-in [login q] conj {:timestamp (timestamp) :addr addr})))

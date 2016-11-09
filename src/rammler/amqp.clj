@@ -16,7 +16,7 @@
 
 (ns rammler.amqp
   (:refer-clojure :exclude [short long boolean float double type rest])
-  (:require [rammler.util :refer :all]
+  (:require [rammler.util :refer [flagfn]]
             [gloss.core :as gloss :refer :all]
             [gloss.io :refer [decode decode-stream encode]]
             [manifold.stream :as s]
@@ -373,6 +373,10 @@
   (s/map decode-amqp-frame (decode-stream src amqp-frame)))
 
 (defn decode-amqp-stream-light
-  "Return new gloss stream from `src` that emits partially decoded frames"
+  "Return new gloss stream from `src` that emits partially decoded frames together with the raw bytes"
   [src]
-  (s/map decode-amqp-frame-light (decode-stream src amqp-frame)))
+  (s/map
+    (fn [frame]
+      [(decode-amqp-frame-light frame)
+       (encode amqp-frame frame)])
+    (decode-stream src amqp-frame)))
