@@ -368,15 +368,16 @@
          (throw (ex-info "Error decoding frame" {:cause :frame-decoding-error} e)))))
 
 (defn decode-amqp-stream
-  "Return new gloss stream from `src` that emits decoded frames"
+  "Return new manifold stream from `src` that emits decoded frames"
   [src]
   (s/map decode-amqp-frame (decode-stream src amqp-frame)))
 
 (defn decode-amqp-stream-light
-  "Return new gloss stream from `src` that emits partially decoded frames together with the raw bytes"
+  "Return new manifold stream from `src` that emits partially decoded frames"
   [src]
-  (s/map
-    (fn [frame]
-      [(decode-amqp-frame-light frame)
-       (encode amqp-frame frame)])
-    (decode-stream src amqp-frame)))
+  (s/map decode-amqp-frame-light (decode-stream src amqp-frame)))
+
+(defn decode-amqp-stream-split
+  "Return new manifold stream from `src` that emits tuples of partially decoded frames and bytes"
+  [src]
+  (s/map (juxt decode-amqp-frame-light (partial encode amqp-frame)) (decode-stream src amqp-frame)))

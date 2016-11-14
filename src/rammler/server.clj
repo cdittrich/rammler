@@ -19,6 +19,8 @@
             [rammler.util :as util :refer [timestamp]]
             [rammler.conf :as conf]
             [rammler.stats :as stats]
+            [rammler.stream :as rs]
+            [rammler.throttle :as th]
             [aleph.tcp :as tcp]
             [aleph.netty :as netty]
             [gloss.io :refer [decode-stream decode encode]]
@@ -33,81 +35,6 @@
 
 (defonce server (atom nil))
 (defonce ssl-server (atom nil))
-
-(defn decoder
-  "Provide a decoding stream from `src` using `f` that pushes messages through agent `a`"
-  ([src a] (decoder src identity a))
-  ([src f a]
-   (let [dst (s/stream)]
-     (s/connect-via src (fn [frame] (send a (fn [_] (s/put! dst frame))) d/true-deferred-) dst)
-     (s/on-drained src #(s/close! dst))
-     (f dst))))
-
-(defn timer
-  "manifold stream that emits `hertz` `:token`s per second.
-
-  Charges up to `burst` messages when not consumed."
-  ([hertz burst]
-   (s/buffer burst (s/periodically (int (* (/ 1 hertz) 1000)) (constantly :token))))
-  ([hertz] (timer hertz hertz)))
-
-(defn queued
-  "Return queued stream from `source`
-
-  Whenever a value can be taken from `timer`, emit a message."
-  [source timer]
-  (let [sink (s/stream)]
-    (s/connect-via source
-      (fn [msg] (d/chain (s/take! timer) (fn [_] (s/put! sink msg))))
-      sink)
-    sink))
-
-(comment
-  (let [i (atom 0)]
-    (time (dotimes [_ 10] (println @(s/take! (queued (s/periodically 100 #(swap! i inc)) (timer 4 1)))))))
-
-  (let [hertz 10]
-    (go-loop [events nil]
-      (let [[msg ch] (alts! [queue stop-channel])]
-        (if (= ch stop-channel)
-          (debug "Returning")
-          (let [t (timestamp)
-                events (take-while #(<= (- t 1000) %) events)]
-            (when (>= (count events) hertz)
-              (debug "Waiting" (- (nth events (dec hertz)) (- t 1000)) (seq events))
-              (<! (timeout (- (last events) (- t 1000)))))
-            (debug "Running" msg (count events))
-            (recur (cons (timestamp) events))))))))
-
-(defn shared-buffered-stream
-  "Shared counter version of `manifold.stream/buffered-stream`"
-  ([size-ref last-put buffer-size]
-    (shared-buffered-stream size-ref last-put (constantly 1) buffer-size))
-  ([size-ref last-put metric limit]
-    (shared-buffered-stream size-ref last-put metric limit identity))
-  ([^AtomicLong size-ref ^AtomicReference last-put metric limit description]
-    (let [buf (s/stream Integer/MAX_VALUE)
-          buf+ (fn [^long n]
-                 (locking last-put
-                   (let [buf' (.addAndGet size-ref n)
-                         buf  (unchecked-subtract buf' n)]
-                     (cond
-                       (and (<= buf' limit) (< limit buf))
-                       (-> last-put .get (d/success! true))
-
-                       (and (<= buf limit) (< limit buf'))
-                       (-> last-put (.getAndSet (d/deferred)) (d/success! true))))))]
-
-      (BufferedStream.
-        buf
-        limit
-        metric
-        description
-        size-ref
-        last-put
-        buf+
-        (atom nil)
-        (atom nil)))))
 
 (defn send-start
   "Send fully encoded connection.start frame through `stream`"
@@ -129,6 +56,15 @@
                          :locales "en_US"}}]
     (s/put! stream (amqp/encode-frame frame))))
 
+(defn- frame-weight [frame]
+  (if (some #{(select-keys frame [:type :class :method])}
+        [{:type :method :class :basic :method :deliver}
+         {:type :method :class :basic :method :publish}])
+    1 0))
+
+(defn- queued [src timer]
+  (s/map second (rs/queued (amqp/decode-amqp-stream-split src) timer (comp frame-weight first))))
+
 (defn handle-connection-start-ok
   "Once the client sent connection.start-ok, attempt to initiate the proxy connection"
   [stream info resolver agent trace? stats? {:keys [payload] :as frame}]
@@ -146,22 +82,15 @@
          (fn [frame]
            (debugf "Connected to RabbitMQ %s:%d" (server :host) (server :port))
            (debug "Server" (prn-str frame))
-           (when stats? (stats/init-account! login))
-           (let [stream' (amqp/decode-amqp-stream-light stream)
-                 conn' (amqp/decode-amqp-stream-light conn)]
-             (let [buffer-size (AtomicLong. 0)
-                   last-put (AtomicReference. (d/success-deferred true))
-                   buffered (fn [source]
-                              (let [buffer (shared-buffered-stream buffer-size last-put 1)]
-                                (s/connect source buffer)
-                                (s/map second buffer)))]
-               (s/connect (buffered stream') conn)
-               (s/connect (buffered conn') stream))
-             (when trace? (s/consume #(debug "Server" (pr-str %)) (decoder conn amqp/decode-amqp-stream agent)))
-             (when stats?
-               (let [handler (comp (stats/handler login remote-addr) first)]
-                 (s/consume handler (decoder stream' agent))
-                 (s/consume handler (decoder conn' agent))))))))
+           (let [timer (th/timer login 4)]
+             (s/connect (queued stream timer) conn)
+             (s/connect (queued conn timer) stream))
+           (when trace? (s/consume #(debug "Server" (pr-str %)) (amqp/decode-amqp-stream (rs/async-stream conn agent))))
+           (when stats?
+             (stats/init-account! login)
+             (let [handler (comp (stats/handler login remote-addr) first)]
+               (s/consume handler (amqp/decode-amqp-stream-light (rs/async-stream stream agent)))
+               (s/consume handler (amqp/decode-amqp-stream-light (rs/async-stream conn agent))))))))
       (throw (ex-info "Unresolvable username" {:user login})))))
 
 (defn handler
@@ -207,7 +136,7 @@
               (d/chain (send-start s capabilities name) (fn [_] (s/take! s'))
                 (fn [{:keys [type class method] :as frame}]
                   (s/close! s')
-                  (when trace? (s/consume #(debug "Client" (pr-str %)) (decoder s amqp/decode-amqp-stream a)))
+                  (when trace? (s/consume #(debug "Client" (pr-str %)) (amqp/decode-amqp-stream (rs/async-stream s a))))
                   (if (= [type class method] [:method :connection :start-ok])
                     (handle-connection-start-ok (s/splice s s'') info resolver a trace? stats? frame)
                     (throw (ex-info "Protocol violation" {:expected {:type :method :class :connection :method :start-ok}
