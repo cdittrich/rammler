@@ -74,23 +74,31 @@
       remote-addr (client-properties "product") (client-properties "version")
       login server-name server-port)
     (debug "Client" frame)
-    (if-let [server (resolver login)]
-      (d/let-flow [conn (tcp/client server)]
-       (d/chain (s/put! conn (encode amqp/amqp-header ["AMQP" 0 0 9 1]))
-         (fn [_] (s/take! conn))
-         (partial decode amqp/amqp-frame) amqp/decode-amqp-frame
-         (fn [frame]
-           (debugf "Connected to RabbitMQ %s:%d" (server :host) (server :port))
-           (debug "Server" (prn-str frame))
-           (let [timer (th/timer login 4)]
-             (s/connect (queued stream timer) conn)
-             (s/connect (queued conn timer) stream))
-           (when trace? (s/consume #(debug "Server" (pr-str %)) (amqp/decode-amqp-stream (rs/async-stream conn agent))))
-           (when stats?
-             (stats/init-account! login)
-             (let [handler (comp (stats/handler login remote-addr) first)]
-               (s/consume handler (amqp/decode-amqp-stream-light (rs/async-stream stream agent)))
-               (s/consume handler (amqp/decode-amqp-stream-light (rs/async-stream conn agent))))))))
+    (if-let [data (resolver login)]
+      (let [server (select-keys data [:server :host])
+            {:keys [throttle]} data]
+        (d/let-flow [conn (tcp/client server)]
+          (d/chain (s/put! conn (encode amqp/amqp-header ["AMQP" 0 0 9 1]))
+            (fn [_] (s/take! conn))
+            (partial decode amqp/amqp-frame) amqp/decode-amqp-frame
+            (fn [frame]
+              (debugf "Connected to RabbitMQ %s:%d" (server :host) (server :port))
+              (debug "Server" (prn-str frame))
+              (if throttle
+                (let [timer (th/timer login throttle)]
+                  (debugf "Using throttled connection at %s hertz" throttle)
+                  (s/connect (queued stream timer) conn)
+                  (s/connect (queued conn timer) stream))
+                (do
+                  (debug "Using unthrottled connection")
+                  (s/connect stream conn)
+                  (s/connect conn stream)))
+              (when trace? (s/consume #(debug "Server" (pr-str %)) (amqp/decode-amqp-stream (rs/async-stream conn agent))))
+              (when stats?
+                (stats/init-account! login)
+                (let [handler (comp (stats/handler login remote-addr) first)]
+                  (s/consume handler (amqp/decode-amqp-stream-light (rs/async-stream stream agent)))
+                  (s/consume handler (amqp/decode-amqp-stream-light (rs/async-stream conn agent)))))))))
       (throw (ex-info "Unresolvable username" {:user login})))))
 
 (defn handler
