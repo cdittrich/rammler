@@ -15,7 +15,8 @@
                   #_:database/spec #_"postgresql://localhost:5432/database?user=user&password=password"
                   :database/query "select * from host where user = '$user'"}
        :static {:static/host "rabbitmq"
-                :static/port 5672}
+                :static/port 5672
+                #_:static/throttle #_10}
        :capabilities [:publisher-confirms
                       :per-consumer-qos
                       :exchange-exchange-bindings

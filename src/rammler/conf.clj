@@ -87,7 +87,7 @@
 (s/def :conf/stats? boolean?)
 
 (s/def :conf/database (s/keys :req [:database/spec :database/query]))
-(s/def :conf/static (s/keys :req [:static/host :static/port]))
+(s/def :conf/static (s/keys :req [:static/host :static/port] :opt [:static/throttle]))
 
 (s/def :database/spec (s/keys :req-un [:database/subprotocol :database/subname :database/user :database/password]))
 (s/def :database/query string?)
@@ -98,6 +98,7 @@
 
 (s/def :static/host string?)
 (s/def :static/port integer?)
+(s/def :static/throttle integer?)
 
 (s/def :conf/capabilities (s/coll-of keyword?))
 
